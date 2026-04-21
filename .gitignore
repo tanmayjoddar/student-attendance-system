@@ -22,3 +22,7 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Ignore .md planning files in root
+*.md
+!attendance-system/**/*.md
