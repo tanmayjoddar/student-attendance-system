@@ -19,7 +19,6 @@ return new class extends Migration
             $table->string('email')->unique();
             $table->string('phone')->nullable();
             $table->string('department')->nullable();
-            $table->string('semester')->nullable();
             $table->boolean('is_active')->default(true);
             $table->timestamps();
         });

@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class AttendanceLog extends Model
 {
@@ -20,6 +21,9 @@ class AttendanceLog extends Model
         'stated_time',
         'ip_address',
         'is_flagged',
+        'face_verified',
+        'liveness_score',
+        'verification_meta',
         'submitted_by',
     ];
 
@@ -28,6 +32,9 @@ class AttendanceLog extends Model
         'recorded_time' => 'datetime',
         'stated_time' => 'datetime',
         'is_flagged' => 'boolean',
+        'face_verified' => 'boolean',
+        'liveness_score' => 'decimal:2',
+        'verification_meta' => 'array',
     ];
 
     public function student(): BelongsTo
@@ -38,6 +45,12 @@ class AttendanceLog extends Model
     public function submittedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'submitted_by');
+    }
+
+    public function auditTrails(): HasMany
+    {
+        return $this->hasMany(AuditTrail::class, 'model_id')
+            ->where('model_type', self::class);
     }
 
     public function isCheckIn(): bool

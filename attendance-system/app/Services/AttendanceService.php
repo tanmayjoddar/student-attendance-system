@@ -6,6 +6,7 @@ use App\Exceptions\DuplicateAttendanceException;
 use App\Models\AttendanceLog;
 use App\Models\AuditTrail;
 use App\Models\Student;
+use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -14,10 +15,12 @@ class AttendanceService
     /**
      * Process check-in for a student
      */
-    public function checkIn(Student $student, ?string $statedTime = null): AttendanceLog
+    public function checkIn(Student $student, ?string $statedTime = null, ?array $verification = null): AttendanceLog
     {
         $today = Carbon::today();
         $now = Carbon::now();
+
+        $this->validateFaceVerification($student, $verification);
 
         // Check if already checked in today
         $existingCheckIn = AttendanceLog::where('student_id', $student->id)
@@ -41,7 +44,7 @@ class AttendanceService
         $parsedStated = $this->validateStatedTime($statedTime, $now);
 
         // Create attendance log
-        return DB::transaction(function () use ($student, $today, $now, $parsedStated) {
+        return DB::transaction(function () use ($student, $today, $now, $parsedStated, $verification) {
             $log = AttendanceLog::create([
                 'student_id'    => $student->id,
                 'date'          => $today,
@@ -50,7 +53,15 @@ class AttendanceService
                 'stated_time'   => $parsedStated,
                 'ip_address'    => request()->ip(),
                 'is_flagged'    => false,
-                'submitted_by'  => auth()->id(),
+                'face_verified' => true,
+                'liveness_score' => isset($verification['liveness_score']) ? (float) $verification['liveness_score'] : null,
+                'verification_meta' => [
+                    'match_score' => $verification['match_score'] ?? null,
+                    'blink_count' => $verification['blink_count'] ?? null,
+                    'yaw_variance' => $verification['yaw_variance'] ?? null,
+                    'verified_at' => Carbon::now()->toIso8601String(),
+                ],
+                'submitted_by'  => $this->resolveSubmittedByUserId(),
             ]);
 
             $this->createAuditTrail('create', $log);
@@ -62,10 +73,12 @@ class AttendanceService
     /**
      * Process check-out for a student
      */
-    public function checkOut(Student $student): AttendanceLog
+    public function checkOut(Student $student, ?array $verification = null): AttendanceLog
     {
         $today = Carbon::today();
         $now = Carbon::now();
+
+        $this->validateFaceVerification($student, $verification);
 
         // Check if checked in today
         $checkIn = AttendanceLog::where('student_id', $student->id)
@@ -93,7 +106,7 @@ class AttendanceService
             throw new \InvalidArgumentException('Check-out too soon after check-in');
         }
 
-        return DB::transaction(function () use ($student, $today, $now) {
+        return DB::transaction(function () use ($student, $today, $now, $verification) {
             $log = AttendanceLog::create([
                 'student_id'    => $student->id,
                 'date'          => $today,
@@ -102,7 +115,15 @@ class AttendanceService
                 'stated_time'   => null,
                 'ip_address'    => request()->ip(),
                 'is_flagged'    => false,
-                'submitted_by'  => auth()->id(),
+                'face_verified' => true,
+                'liveness_score' => isset($verification['liveness_score']) ? (float) $verification['liveness_score'] : null,
+                'verification_meta' => [
+                    'match_score' => $verification['match_score'] ?? null,
+                    'blink_count' => $verification['blink_count'] ?? null,
+                    'yaw_variance' => $verification['yaw_variance'] ?? null,
+                    'verified_at' => Carbon::now()->toIso8601String(),
+                ],
+                'submitted_by'  => $this->resolveSubmittedByUserId(),
             ]);
 
             $this->createAuditTrail('create', $log);
@@ -187,6 +208,36 @@ class AttendanceService
     }
 
     /**
+     * Identify IPs with unusually high check-ins in a short time window.
+     */
+    public function detectSuspiciousIPs(): array
+    {
+        $threshold = (int) config('attendance.rate_limit.max_attempts', 5);
+
+        $logs = AttendanceLog::where('type', 'in')
+            ->orderBy('ip_address')
+            ->orderBy('recorded_time')
+            ->get();
+
+        $result = [];
+
+        foreach ($logs->groupBy('ip_address') as $ip => $ipLogs) {
+            foreach ($ipLogs as $log) {
+                $window = $ipLogs->filter(function ($candidate) use ($log) {
+                    return abs($candidate->recorded_time->diffInSeconds($log->recorded_time)) <= 120;
+                });
+
+                if ($window->count() >= $threshold) {
+                    $result[$ip] = $window->pluck('id')->values()->all();
+                    break;
+                }
+            }
+        }
+
+        return $result;
+    }
+
+    /**
      * Validate stated time for anti-cheat
      */
     protected function validateStatedTime(?string $statedTime, Carbon $now): ?Carbon
@@ -199,7 +250,7 @@ class AttendanceService
         $gracePeriod = config('attendance.grace_period_minutes');
 
         // Prevent future backdating beyond grace period
-        if ($parsed->gt($now->addMinutes($gracePeriod))) {
+        if ($parsed->gt($now->copy()->addMinutes($gracePeriod))) {
             throw new \InvalidArgumentException('Stated time cannot be in the future');
         }
 
@@ -224,5 +275,41 @@ class AttendanceService
             'user_id'    => auth()->id(),
             'ip_address' => request()->ip(),
         ]);
+    }
+
+    /**
+     * Resolve submitter user ID for kiosk mode where students do not authenticate.
+     */
+    protected function resolveSubmittedByUserId(): int
+    {
+        $authId = auth()->id();
+        if ($authId) {
+            return (int) $authId;
+        }
+
+        $adminId = User::where('role', 'super_admin')->value('id');
+        if ($adminId) {
+            return (int) $adminId;
+        }
+
+        throw new \RuntimeException('No super admin user found. Please seed admin first.');
+    }
+
+    /**
+     * Enforce biometric verification and liveness signals before attendance actions.
+     */
+    protected function validateFaceVerification(Student $student, ?array $verification): void
+    {
+        if (!$verification || !($verification['face_verified'] ?? false)) {
+            throw new \InvalidArgumentException('Face verification is required before attendance.');
+        }
+
+        $minLiveness = (float) config('attendance.face.min_liveness_score', 70);
+
+        $livenessScore = isset($verification['liveness_score']) ? (float) $verification['liveness_score'] : 0;
+
+        if ($livenessScore < $minLiveness) {
+            throw new \InvalidArgumentException('Liveness check failed. Please blink and turn your head slightly, then retry.');
+        }
     }
 }
