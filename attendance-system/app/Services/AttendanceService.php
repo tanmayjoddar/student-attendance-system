@@ -100,12 +100,6 @@ class AttendanceService
             throw new DuplicateAttendanceException('Already checked out today');
         }
 
-        // Minimum duration check (anti-cheat)
-        $duration = $now->diffInSeconds($checkIn->recorded_time);
-        if ($duration < config('attendance.min_checkin_duration')) {
-            throw new \InvalidArgumentException('Check-out too soon after check-in');
-        }
-
         return DB::transaction(function () use ($student, $today, $now, $verification) {
             $log = AttendanceLog::create([
                 'student_id'    => $student->id,

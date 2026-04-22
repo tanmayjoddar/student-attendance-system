@@ -9,7 +9,7 @@
 
     <!-- Bootstrap CDN -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    
+
     <style>
         :root {
             --color-canvas-default: #ffffff;
@@ -284,24 +284,64 @@
     @stack('styles')
 </head>
 <body>
+    @php
+        $isKioskPage = request()->routeIs('attendance.*') || request()->routeIs('student.register*');
+        $homeRoute = 'attendance.kiosk';
+
+        if (auth()->check()) {
+            $homeRoute = auth()->user()->role === 'super_admin' ? 'admin.dashboard' : 'student.dashboard';
+        }
+    @endphp
+
     <!-- Header -->
     <header class="header">
         <div class="d-flex flex-items-center" style="max-width: 1280px; margin: 0 auto;">
-            <h1><a href="{{ auth()->user()->role === 'super_admin' ? route('admin.dashboard') : route('student.dashboard') }}">{{ config('app.name', 'AttendanceHub') }}</a></h1>
-            
-            @auth
-            <div style="margin-left: auto;">
-                <span class="text-small" style="margin-right: 16px;">{{ auth()->user()->name }}</span>
-                <a href="{{ route('logout') }}" 
-                   onclick="event.preventDefault(); document.getElementById('logout-form').submit();"
-                   class="btn" style="padding: 3px 12px; font-size: 12px; background: transparent; border: 1px solid rgba(255,255,255,0.3); color: white;">
-                    Logout
-                </a>
-                <form id="logout-form" action="{{ route('logout') }}" method="POST" class="d-none">
-                    @csrf
-                </form>
-            </div>
-            @endauth
+            <h1><a href="{{ route($homeRoute) }}">{{ config('app.name', 'AttendanceHub') }}</a></h1>
+
+            @if($isKioskPage)
+                <div style="margin-left: auto;">
+                    @guest
+                    <a href="{{ route('login') }}"
+                       class="btn" style="padding: 3px 12px; font-size: 12px; background: #238636; border: 1px solid rgba(255,255,255,0.3); color: white;">
+                        Admin Login
+                    </a>
+                    @else
+                        @if(auth()->user()->role === 'super_admin')
+                        <a href="{{ route('admin.dashboard') }}"
+                           class="btn" style="padding: 3px 12px; font-size: 12px; background: #0969da; border: 1px solid rgba(255,255,255,0.3); color: white;">
+                            Admin Panel
+                        </a>
+                        @else
+                        <a href="{{ route('student.dashboard') }}"
+                           class="btn" style="padding: 3px 12px; font-size: 12px; background: transparent; border: 1px solid rgba(255,255,255,0.3); color: white;">
+                            Dashboard
+                        </a>
+                        @endif
+                    @endguest
+                </div>
+            @else
+                @auth
+                <div style="margin-left: auto;">
+                    <span class="text-small" style="margin-right: 16px;">{{ auth()->user()->name }}</span>
+                    <a href="{{ route('logout') }}"
+                       onclick="event.preventDefault(); document.getElementById('logout-form').submit();"
+                       class="btn" style="padding: 3px 12px; font-size: 12px; background: transparent; border: 1px solid rgba(255,255,255,0.3); color: white;">
+                        Logout
+                    </a>
+                    <form id="logout-form" action="{{ route('logout') }}" method="POST" class="d-none">
+                        @csrf
+                    </form>
+                </div>
+                @endauth
+                @guest
+                <div style="margin-left: auto;">
+                    <a href="{{ route('login') }}"
+                       class="btn" style="padding: 3px 12px; font-size: 12px; background: transparent; border: 1px solid rgba(255,255,255,0.3); color: white;">
+                        Login
+                    </a>
+                </div>
+                @endguest
+            @endif
         </div>
     </header>
 

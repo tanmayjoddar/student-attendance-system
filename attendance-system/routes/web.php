@@ -19,6 +19,12 @@ Route::post('/attendance/check-in', [StudentDashboardController::class, 'checkIn
 Route::post('/attendance/check-out', [StudentDashboardController::class, 'checkOutPublic'])
     ->name('attendance.check-out')
     ->middleware('throttle:attendance');
+Route::get('/attendance/check-in', function () {
+    return redirect()->route('attendance.kiosk')->with('error', 'Use the kiosk form to submit check-in.');
+});
+Route::get('/attendance/check-out', function () {
+    return redirect()->route('attendance.kiosk')->with('error', 'Use the kiosk form to submit check-out.');
+});
 Route::post('/attendance/face-register', [StudentDashboardController::class, 'registerFace'])
     ->name('attendance.face-register')
     ->middleware('throttle:attendance');
@@ -38,7 +44,7 @@ Route::prefix('admin')
     ->middleware(['auth', 'role:super_admin'])
     ->group(function () {
         Route::get('/dashboard', [AdminDashboardController::class, 'index'])->name('dashboard');
-        Route::resource('students', AdminStudentController::class);
+        Route::resource('students', AdminStudentController::class)->except(['destroy']);
         Route::get('/attendance', [AdminAttendanceController::class, 'index'])->name('attendance');
         Route::get('/attendance/{studentId}', [AdminAttendanceController::class, 'show'])->name('attendance.show');
         Route::post('/attendance/{logId}/override', [AdminAttendanceController::class, 'override'])->name('attendance.override');

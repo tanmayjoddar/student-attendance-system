@@ -26,8 +26,18 @@ class StudentDashboardController extends Controller
 
     public function kiosk()
     {
+        $today = Carbon::today()->toDateString();
+
         $students = Student::query()
             ->where('is_active', true)
+            ->withCount([
+                'attendanceLogs as today_checkin_count' => function ($query) use ($today) {
+                    $query->whereDate('date', $today)->where('type', 'in');
+                },
+                'attendanceLogs as today_checkout_count' => function ($query) use ($today) {
+                    $query->whereDate('date', $today)->where('type', 'out');
+                },
+            ])
             ->orderBy('first_name')
             ->orderBy('last_name')
             ->get();

@@ -25,6 +25,8 @@
                 @foreach($students as $student)
                     <option value="{{ $student->student_id }}"
                             data-face="{{ $student->face_registered_at ? '1' : '0' }}"
+                            data-has-checkin="{{ ($student->today_checkin_count ?? 0) > 0 ? '1' : '0' }}"
+                            data-has-checkout="{{ ($student->today_checkout_count ?? 0) > 0 ? '1' : '0' }}"
                             data-signature='@json($student->face_signature ?? [])'>
                         {{ $student->student_id }} - {{ $student->full_name }}
                     </option>
@@ -117,6 +119,8 @@
     const camEl = document.getElementById('cam');
 
     const forms = [document.getElementById('checkin-form'), document.getElementById('checkout-form')].filter(Boolean);
+    const checkinForm = document.getElementById('checkin-form');
+    const checkoutForm = document.getElementById('checkout-form');
 
     const state = {
         running: false,
@@ -132,6 +136,8 @@
         liveFrames: 0,
         lastDetectionAt: 0,
         verificationAt: 0,
+        hasCheckInToday: false,
+        hasCheckOutToday: false,
     };
 
     function distance(a, b) {
@@ -197,18 +203,34 @@
     }
 
     function updateSubmitButtons() {
-        const liveSignalOk = state.running && (Date.now() - state.lastDetectionAt) <= 1500 && state.liveFrames >= 15;
+        const selected = Boolean(select.value);
         const verifyFresh = (Date.now() - state.verificationAt) <= 60000;
-        const allowSubmit = state.verified && liveSignalOk && verifyFresh;
+        const verifiedReady = selected && state.verified && verifyFresh;
+
+        const allowCheckIn = verifiedReady && !state.hasCheckInToday;
+        const allowCheckOut = verifiedReady && state.hasCheckInToday && !state.hasCheckOutToday;
 
         forms.forEach(form => {
             const submitButton = form.querySelector('button[type="submit"]');
+            const isCheckInForm = form.id === 'checkin-form';
+            const allowSubmit = isCheckInForm ? allowCheckIn : allowCheckOut;
+
             if (submitButton) {
                 submitButton.disabled = !allowSubmit;
                 submitButton.style.opacity = allowSubmit ? '1' : '0.55';
                 submitButton.style.cursor = allowSubmit ? 'pointer' : 'not-allowed';
             }
         });
+
+        if (!selected) {
+            msgEl.textContent = 'Select a student to enable attendance actions.';
+        } else if (state.hasCheckOutToday) {
+            msgEl.textContent = 'Attendance already completed for this student today.';
+        } else if (state.hasCheckInToday) {
+            msgEl.textContent = 'Check-in is already done. You can submit Check Out after verification.';
+        } else {
+            msgEl.textContent = 'Check In is available after successful verification.';
+        }
     }
 
     function setStatus(message, ok = false) {
@@ -221,8 +243,14 @@
     async function fetchSignature(studentId) {
         const option = select.options[select.selectedIndex];
         const hasFace = option && option.dataset.face === '1';
+
+        state.hasCheckInToday = option ? option.dataset.hasCheckin === '1' : false;
+        state.hasCheckOutToday = option ? option.dataset.hasCheckout === '1' : false;
+
         if (!studentId) {
             state.signature = null;
+            state.hasCheckInToday = false;
+            state.hasCheckOutToday = false;
             faceStatus.textContent = 'Select a student to continue.';
             return;
         }
@@ -411,18 +439,13 @@
             return;
         }
 
-        if (!state.signature) {
-            setStatus('Register face profile for selected student first.');
-            return;
-        }
-
         setStatus(state.verified ? 'Verified' : 'Verification incomplete', state.verified);
     });
 
     forms.forEach(form => {
         form.addEventListener('submit', (event) => {
-            const liveSignalOk = state.running && (Date.now() - state.lastDetectionAt) <= 1500 && state.liveFrames >= 15;
             const verifyFresh = (Date.now() - state.verificationAt) <= 60000;
+            const isCheckInForm = form.id === 'checkin-form';
 
             if (!select.value) {
                 event.preventDefault();
@@ -430,9 +453,27 @@
                 return;
             }
 
-            if (!state.verified || !liveSignalOk || !verifyFresh) {
+            if (!state.verified || !verifyFresh) {
                 event.preventDefault();
                 setStatus('Attendance blocked: complete live MediaPipe verification first.');
+                return;
+            }
+
+            if (isCheckInForm && state.hasCheckInToday) {
+                event.preventDefault();
+                setStatus('Check-in already submitted for this student today.');
+                return;
+            }
+
+            if (!isCheckInForm && !state.hasCheckInToday) {
+                event.preventDefault();
+                setStatus('Check-out blocked: submit check-in first.');
+                return;
+            }
+
+            if (!isCheckInForm && state.hasCheckOutToday) {
+                event.preventDefault();
+                setStatus('Check-out already submitted for this student today.');
             }
         });
     });
