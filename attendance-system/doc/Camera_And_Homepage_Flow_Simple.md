@@ -49,6 +49,18 @@ Main objects used:
 - new Camera(...)
 - faceMesh.onResults(...)
 
+MediaPipe/CDN links used in code:
+
+- https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js
+- https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js
+- https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js
+- https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file} (internal asset loading via locateFile)
+
+Note on browser console logs:
+
+- Logs like "Successfully created a WebGL context" are informational MediaPipe/WASM startup logs.
+- They are normal and do not mean verification failure.
+
 ## 4) MediaPipe liveness flow (no photo cheating)
 
 System uses liveness behavior, not static image matching.

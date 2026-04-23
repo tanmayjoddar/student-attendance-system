@@ -77,6 +77,7 @@
                     <input type="datetime-local" name="stated_time" class="form-control" max="{{ now()->format('Y-m-d\\TH:i') }}">
                 </div>
                 <input type="hidden" name="face_verified" value="0">
+                <input type="hidden" name="spoof_passed" value="0">
                 <input type="hidden" name="liveness_score" value="0">
                 <input type="hidden" name="match_score" value="0">
                 <input type="hidden" name="blink_count" value="0">
@@ -93,6 +94,7 @@
                 @csrf
                 <input type="hidden" name="student_id" value="">
                 <input type="hidden" name="face_verified" value="0">
+                <input type="hidden" name="spoof_passed" value="0">
                 <input type="hidden" name="liveness_score" value="0">
                 <input type="hidden" name="match_score" value="0">
                 <input type="hidden" name="blink_count" value="0">
@@ -110,6 +112,10 @@
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
 <script>
 (() => {
+    const MIN_LIVENESS = Number("{{ config('attendance.face.min_liveness_score', 75) }}");
+    const MIN_MATCH = Number("{{ config('attendance.face.min_match_score', 82) }}");
+    const MIN_MATCH_SAMPLES = 6;
+
     const csrf = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
     const select = document.getElementById('student-id-select');
     const faceStatus = document.getElementById('student-face-status');
@@ -138,6 +144,8 @@
         verificationAt: 0,
         hasCheckInToday: false,
         hasCheckOutToday: false,
+        spoofPassed: false,
+        matchSamples: [],
     };
 
     function distance(a, b) {
@@ -152,22 +160,57 @@
         return horizontal ? vertical / horizontal : 0;
     }
 
-    function extractSignature(landmarks) {
-        const idx = [1, 33, 263, 61, 291, 199, 152, 10, 234, 454];
-        const leftEye = landmarks[33];
-        const rightEye = landmarks[263];
-        const eyeDist = distance(leftEye, rightEye) || 1;
-        const centerX = (leftEye.x + rightEye.x) / 2;
-        const centerY = (leftEye.y + rightEye.y) / 2;
+function extractSignature(landmarks) {
+    const idx = [
+        // Core structure
+        1, 33, 263, 61, 291, 199, 152, 10, 234, 454,
+        // Eyebrows
+        70, 63, 105, 66, 300, 293, 334, 296,
+        // Eye lids (height gives eye openness)
+        159, 145, 386, 374,
+        // Left eye detail
+        157, 144, 160, 153,
+        // Right eye detail
+        384, 381, 387, 380,
+        // Nose bridge + width
+        6, 197, 195, 5, 4, 98, 327, 94,
+        // Lip detail
+        13, 14, 78, 308, 82, 312, 87, 317,
+        // Jaw line
+        172, 397, 136, 365, 150, 379,
+        // Temples
+        162, 389, 103, 332,
+        // Mid cheek
+        116, 345, 123, 352,
+        // Forehead width
+        54, 284, 21, 251,
+        // Chin detail
+        175, 171, 396, 176,
+        // Extra nose
+        48, 278, 115, 344,
+        // Philtrum / under nose
+        164, 393, 167, 394,
+    ];
 
-        const vector = [];
-        idx.forEach(i => {
-            vector.push((landmarks[i].x - centerX) / eyeDist);
-            vector.push((landmarks[i].y - centerY) / eyeDist);
-        });
+    const leftEye   = landmarks[33];
+    const rightEye  = landmarks[263];
+    const chin      = landmarks[152];
+    const forehead  = landmarks[10];
 
-        return vector;
-    }
+    const eyeDist   = distance(leftEye, rightEye) || 1;
+    const faceH     = distance(chin, forehead)    || 1;
+
+    const centerX   = (leftEye.x + rightEye.x) / 2;
+    const centerY   = (leftEye.y + rightEye.y) / 2;
+
+    const vector = [];
+    idx.forEach(i => {
+        vector.push((landmarks[i].x - centerX) / eyeDist);
+        vector.push((landmarks[i].y - centerY) / faceH);   // Y normalized by face height
+    });
+
+    return vector;  // 80 points × 2 = 160 floats
+}
 
     function similarityScore(a, b) {
         if (!Array.isArray(a) || !Array.isArray(b) || !a.length || a.length !== b.length) {
@@ -184,14 +227,19 @@
             magB += b[i] * b[i];
         }
 
-        const denom = Math.sqrt(magA) * Math.sqrt(magB) || 1;
-        return Math.max(0, Math.min(100, ((dot / denom) + 1) * 50));
+        const rawCos = dot / (Math.sqrt(magA) * Math.sqrt(magB) || 1);
+        const MIN_COS = 0.80;
+        const MAX_COS = 1.00;
+        return Math.max(0, Math.min(100,
+            ((rawCos - MIN_COS) / (MAX_COS - MIN_COS)) * 100
+        ));
     }
 
     function syncForms() {
         forms.forEach(form => {
             form.querySelector('[name="student_id"]').value = select.value || '';
             form.querySelector('[name="face_verified"]').value = state.verified ? '1' : '0';
+            form.querySelector('[name="spoof_passed"]').value = state.spoofPassed ? '1' : '0';
             form.querySelector('[name="liveness_score"]').value = state.livenessScore.toFixed(2);
             form.querySelector('[name="match_score"]').value = state.matchScore.toFixed(2);
             form.querySelector('[name="blink_count"]').value = String(state.blinkCount);
@@ -278,6 +326,8 @@
     }
 
     let camera;
+    let nativeStream = null;
+    let frameLoopHandle = null;
     const faceMesh = new FaceMesh({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}` });
     faceMesh.setOptions({
         maxNumFaces: 1,
@@ -290,6 +340,9 @@
         if (!results.multiFaceLandmarks || !results.multiFaceLandmarks.length) {
             state.landmarks = null;
             state.verified = false;
+            state.spoofPassed = false;
+            state.matchScore = 0;
+            state.matchSamples = [];
             syncForms();
             return;
         }
@@ -317,23 +370,44 @@
 
         state.livenessScore = Math.min(100, (state.blinkCount >= 1 ? 45 : 0) + Math.min(55, yawVariance * 1800));
 
-        // LIVENESS ONLY - no face matching required!
         const liveSignalOk = state.running && state.liveFrames >= 15;
-        state.verified = state.livenessScore >= 70 && liveSignalOk;
+        state.spoofPassed = state.livenessScore >= MIN_LIVENESS && liveSignalOk;
+
+        if (state.spoofPassed && Array.isArray(state.signature) && state.signature.length) {
+            const liveSignature = extractSignature(landmarks);
+            const instantMatch = similarityScore(liveSignature, state.signature);
+
+            state.matchSamples.push(instantMatch);
+            if (state.matchSamples.length > 8) {
+                state.matchSamples.shift();
+            }
+
+            const sum = state.matchSamples.reduce((acc, value) => acc + value, 0);
+            state.matchScore = sum / state.matchSamples.length;
+            const minSample = Math.min(...state.matchSamples);
+            const enoughSamples = state.matchSamples.length >= MIN_MATCH_SAMPLES;
+            state.verified = enoughSamples && state.matchScore >= MIN_MATCH && minSample >= (MIN_MATCH - 2);
+        } else {
+            state.matchScore = 0;
+            state.matchSamples = [];
+            state.verified = false;
+        }
 
         if (state.verified) {
             state.verificationAt = Date.now();
         }
 
-        scoresEl.textContent = state.livenessScore.toFixed(1) + '%';
-        scoresEl.style.color = state.livenessScore >= 70 ? '#1a7f37' : '#1f2328';
+        scoresEl.textContent = `Liveness ${state.livenessScore.toFixed(1)}% | Match ${state.matchScore.toFixed(1)}% (${state.matchSamples.length}/${MIN_MATCH_SAMPLES})`;
+        scoresEl.style.color = state.verified ? '#1a7f37' : '#1f2328';
 
         if (state.verified) {
-            setStatus('✓ Verified!', true);
-        } else if (state.livenessScore >= 40) {
-            setStatus('Keep blinking and turning head...', false);
+            setStatus('Verified: spoof check + vector match passed.', true);
+        } else if (!state.spoofPassed) {
+            setStatus('Spoof check running: blink and turn your head left/right.', false);
+        } else if (!state.signature) {
+            setStatus('Spoof passed, but no registered face vector found for this student.', false);
         } else {
-            setStatus('Verification incomplete', false);
+            setStatus(`Spoof passed. Matching face vector... need ${MIN_MATCH}%`, false);
         }
 
         syncForms();
@@ -342,27 +416,85 @@
     async function startCamera() {
         if (state.running) return;
 
-        camera = new Camera(camEl, {
-            onFrame: async () => {
-                await faceMesh.send({ image: camEl });
-            },
-            width: 320,
-            height: 240,
-        });
+        const resetVerificationState = () => {
+            state.running = true;
+            state.liveFrames = 0;
+            state.lastDetectionAt = 0;
+            state.verificationAt = 0;
+            state.verified = false;
+            state.spoofPassed = false;
+            state.matchScore = 0;
+            state.matchSamples = [];
+            syncForms();
+        };
 
-        await camera.start();
-        state.running = true;
-        state.liveFrames = 0;
-        state.lastDetectionAt = 0;
-        state.verificationAt = 0;
-        state.verified = false;
-        syncForms();
-        setStatus('Camera started. Complete liveness challenge.');
+        const runFrameLoop = async () => {
+            if (!state.running) return;
+            try {
+                await faceMesh.send({ image: camEl });
+            } catch (_) {
+                // Ignore transient frame errors and continue streaming.
+            }
+            frameLoopHandle = requestAnimationFrame(runFrameLoop);
+        };
+
+        try {
+            camera = new Camera(camEl, {
+                onFrame: async () => {
+                    await faceMesh.send({ image: camEl });
+                },
+                width: 320,
+                height: 240,
+            });
+
+            await camera.start();
+            resetVerificationState();
+            setStatus('Camera started. Complete liveness challenge.');
+            return;
+        } catch (_) {
+            camera = null;
+        }
+
+        // Fallback path for browsers where MediaPipe Camera helper fails.
+        try {
+            nativeStream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    width: { ideal: 320 },
+                    height: { ideal: 240 },
+                    facingMode: 'user',
+                },
+                audio: false,
+            });
+
+            camEl.srcObject = nativeStream;
+            await camEl.play();
+
+            resetVerificationState();
+            frameLoopHandle = requestAnimationFrame(runFrameLoop);
+            setStatus('Camera started (fallback mode). Complete liveness challenge.');
+        } catch (error) {
+            state.running = false;
+            syncForms();
+            setStatus('Camera failed to start. Allow camera permission and retry.');
+            msgEl.textContent = error && error.message ? error.message : 'Could not access camera device.';
+        }
     }
 
     function stopCamera() {
         if (camera && typeof camera.stop === 'function') {
             camera.stop();
+        }
+
+        camera = null;
+
+        if (nativeStream) {
+            nativeStream.getTracks().forEach(track => track.stop());
+            nativeStream = null;
+        }
+
+        if (frameLoopHandle !== null) {
+            cancelAnimationFrame(frameLoopHandle);
+            frameLoopHandle = null;
         }
 
         if (camEl.srcObject) {
@@ -373,9 +505,12 @@
         state.running = false;
         state.landmarks = null;
         state.verified = false;
+        state.spoofPassed = false;
         state.liveFrames = 0;
         state.lastDetectionAt = 0;
         state.verificationAt = 0;
+        state.matchScore = 0;
+        state.matchSamples = [];
         syncForms();
         setStatus('Camera stopped. Start camera to continue.', false);
     }
@@ -420,7 +555,9 @@
     select.addEventListener('change', async () => {
         await fetchSignature(select.value);
         state.verified = false;
+        state.spoofPassed = false;
         state.matchScore = 0;
+        state.matchSamples = [];
         state.livenessScore = 0;
         state.blinkCount = 0;
         state.yawMin = null;
@@ -436,6 +573,16 @@
     document.getElementById('run-verify').addEventListener('click', () => {
         if (!state.running) {
             setStatus('Start camera first.');
+            return;
+        }
+
+        if (!state.spoofPassed) {
+            setStatus('Spoof check not passed yet. Blink and turn your head left/right.');
+            return;
+        }
+
+        if (!state.signature) {
+            setStatus('Registered face vector missing for selected student.');
             return;
         }
 

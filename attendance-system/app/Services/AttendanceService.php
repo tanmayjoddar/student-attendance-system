@@ -57,6 +57,7 @@ class AttendanceService
                 'liveness_score' => isset($verification['liveness_score']) ? (float) $verification['liveness_score'] : null,
                 'verification_meta' => [
                     'match_score' => $verification['match_score'] ?? null,
+                    'spoof_passed' => (bool) ($verification['spoof_passed'] ?? false),
                     'blink_count' => $verification['blink_count'] ?? null,
                     'yaw_variance' => $verification['yaw_variance'] ?? null,
                     'verified_at' => Carbon::now()->toIso8601String(),
@@ -113,6 +114,7 @@ class AttendanceService
                 'liveness_score' => isset($verification['liveness_score']) ? (float) $verification['liveness_score'] : null,
                 'verification_meta' => [
                     'match_score' => $verification['match_score'] ?? null,
+                    'spoof_passed' => (bool) ($verification['spoof_passed'] ?? false),
                     'blink_count' => $verification['blink_count'] ?? null,
                     'yaw_variance' => $verification['yaw_variance'] ?? null,
                     'verified_at' => Carbon::now()->toIso8601String(),
@@ -298,12 +300,27 @@ class AttendanceService
             throw new \InvalidArgumentException('Face verification is required before attendance.');
         }
 
+        if (!($verification['spoof_passed'] ?? false)) {
+            throw new \InvalidArgumentException('Spoof check failed. Please complete live blink and head movement challenge.');
+        }
+
+        // 80 points are stored as x,y pairs => 160 numeric values.
+        if (!is_array($student->face_signature) || count($student->face_signature) < 140) {
+            throw new \InvalidArgumentException('No registered face vector found for this student. Please re-register using a clear face photo.');
+        }
+
         $minLiveness = (float) config('attendance.face.min_liveness_score', 70);
+        $minMatch = (float) config('attendance.face.min_match_score', 82);
 
         $livenessScore = isset($verification['liveness_score']) ? (float) $verification['liveness_score'] : 0;
+        $matchScore = isset($verification['match_score']) ? (float) $verification['match_score'] : 0;
 
         if ($livenessScore < $minLiveness) {
             throw new \InvalidArgumentException('Liveness check failed. Please blink and turn your head slightly, then retry.');
+        }
+
+        if ($matchScore < $minMatch) {
+            throw new \InvalidArgumentException('Face match failed. Please align with camera and retry verification.');
         }
     }
 }

@@ -87,6 +87,7 @@ class StudentDashboardController extends Controller
         try {
             $verification = $request->validate([
                 'face_verified' => 'required|boolean',
+                'spoof_passed' => 'required|boolean',
                 'liveness_score' => 'required|numeric|min:0|max:100',
                 'match_score' => 'nullable|numeric|min:0|max:100',
                 'blink_count' => 'nullable|integer|min:0',
@@ -119,6 +120,7 @@ class StudentDashboardController extends Controller
         try {
             $verification = $request->validate([
                 'face_verified' => 'required|boolean',
+                'spoof_passed' => 'required|boolean',
                 'liveness_score' => 'required|numeric|min:0|max:100',
                 'match_score' => 'nullable|numeric|min:0|max:100',
                 'blink_count' => 'nullable|integer|min:0',
@@ -142,6 +144,7 @@ class StudentDashboardController extends Controller
             'student_id' => 'required|string|exists:students,student_id',
             'stated_time' => 'nullable|date',
             'face_verified' => 'required|boolean',
+            'spoof_passed' => 'required|boolean',
             'liveness_score' => 'required|numeric|min:0|max:100',
             'match_score' => 'nullable|numeric|min:0|max:100',
             'blink_count' => 'nullable|integer|min:0',
@@ -156,6 +159,7 @@ class StudentDashboardController extends Controller
                 $validated['stated_time'] ?? null,
                 [
                     'face_verified' => (bool) $validated['face_verified'],
+                    'spoof_passed' => (bool) $validated['spoof_passed'],
                     'liveness_score' => (float) $validated['liveness_score'],
                     'match_score' => $validated['match_score'] ?? null,
                     'blink_count' => $validated['blink_count'] ?? null,
@@ -174,6 +178,7 @@ class StudentDashboardController extends Controller
         $validated = $request->validate([
             'student_id' => 'required|string|exists:students,student_id',
             'face_verified' => 'required|boolean',
+            'spoof_passed' => 'required|boolean',
             'liveness_score' => 'required|numeric|min:0|max:100',
             'match_score' => 'nullable|numeric|min:0|max:100',
             'blink_count' => 'nullable|integer|min:0',
@@ -187,6 +192,7 @@ class StudentDashboardController extends Controller
                 $student,
                 [
                     'face_verified' => (bool) $validated['face_verified'],
+                    'spoof_passed' => (bool) $validated['spoof_passed'],
                     'liveness_score' => (float) $validated['liveness_score'],
                     'match_score' => $validated['match_score'] ?? null,
                     'blink_count' => $validated['blink_count'] ?? null,
@@ -203,7 +209,8 @@ class StudentDashboardController extends Controller
     public function registerFace(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'signature' => 'required|array|min:10',
+            // 80 points are stored as x,y pairs => 160 numeric values.
+            'signature' => 'required|array|min:140',
             'signature.*' => 'numeric',
             'student_id' => 'nullable|string|exists:students,student_id',
         ]);

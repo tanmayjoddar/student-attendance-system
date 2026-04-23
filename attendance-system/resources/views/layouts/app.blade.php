@@ -306,7 +306,7 @@
                         Admin Login
                     </a>
                     @else
-                        @if(auth()->user()->role === 'super_admin')
+                        @if(auth()->check() && auth()->user()->role === 'super_admin')
                         <a href="{{ route('admin.dashboard') }}"
                            class="btn" style="padding: 3px 12px; font-size: 12px; background: #0969da; border: 1px solid rgba(255,255,255,0.3); color: white;">
                             Admin Panel

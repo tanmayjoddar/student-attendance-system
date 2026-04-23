@@ -32,18 +32,20 @@ If similarity is high, identity match is likely.
 
 ## 2) Current project status (important for presentation)
 
-Current attendance submit path is liveness-only enforcement.
+Current attendance submit path is strict spoof-first + vector-match enforcement.
 
 - Active required checks:
     - face_verified must be true
+    - spoof_passed must be true
     - liveness_score must be >= configured minimum
-
-- Vector match currently exists in frontend utility functions and registration flow, but it is not blocking attendance submission.
+    - match_score must be >= configured minimum
+    - registered face vector must exist for student
 
 So your present flow is:
 
 - Real person challenge first (blink + head movement)
-- Attendance accepted without mandatory vector match threshold
+- Then vector similarity matching
+- Attendance is blocked if either spoof or vector check fails
 
 ## 3) Where this is implemented
 
@@ -154,29 +156,28 @@ When Register Face is used:
 | Blocks wrong person         | Limited                   | Better when threshold tuned        |
 | Current project enforcement | Yes (active)              | Not mandatory in submit path       |
 
-## 7) Why current project keeps liveness mandatory
+## 7) Why project uses spoof-first + vector
 
 Reasonable practical benefits:
 
 - Students do not need login flow at kiosk
 - Real-time anti-photo behavior is prioritized
-- Reduced false rejections from strict match thresholds
+- Identity consistency is verified through vector matching
+- False positives are reduced by strict threshold + multi-frame averaging
 
-## 8) If you want strict identity mode later
+## 8) Current decision rule
 
-You can enforce hybrid policy:
-
-1. Liveness must pass
-2. Match score must pass (for example >= 75)
-
-Suggested decision rule:
+Current rule is hybrid and enforced:
 
 $$
 \text{allow} = (\text{liveness} \ge L_{min}) \land (\text{match} \ge M_{min})
 $$
 
-Current config already has match threshold key in config attendance file, so future hard-enforcement is straightforward.
+Current production defaults:
+
+- liveness minimum: 75
+- match minimum: 90
 
 ## 9) Exact current final statement for sir
 
-Current system performs live face verification using MediaPipe-based liveness signals (blink + head movement) as mandatory attendance gate, while vector calculative signature logic is implemented and available but not currently enforced as a required identity threshold for check-in/check-out.
+Current system performs strict spoof-first verification with MediaPipe liveness signals (blink + head movement), then enforces vector similarity threshold against registered face signature before check-in/check-out is accepted.
