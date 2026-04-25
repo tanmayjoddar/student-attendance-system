@@ -106,34 +106,42 @@
         challengeCompleted: [false, false],
         challengeHoldFrames:0,
         challengeBlinkLow:  false,
+        blinkDoneFrames:    0,
         pitchBaseline:      null,
         browBaseline:       null,
+        browBaselineFrames: 0,
         cooldown:           false,   // prevents rapid re-triggering
     };
 
     // ─── Challenge Definitions ────────────────────────────────────────────────
     const CHALLENGES = [
-{
-    id: 'blink',
-    instruction: 'Blink your eyes',
-    check: (lm, s) => {
-        const ear = (eyeAspectRatio(lm,159,145,33,133) + eyeAspectRatio(lm,386,374,362,263)) / 2;
+        {
+            id: 'blink',
+            instruction: 'Blink your eyes',
+            check: (lm, s) => {
+                const leftEAR  = eyeAspectRatio(lm, 159, 145, 33, 133);
+                const rightEAR = eyeAspectRatio(lm, 386, 374, 362, 263);
+                const ear = (leftEAR + rightEAR) / 2;
 
-        // DEBUG - show live EAR on screen
-        scoresEl.textContent = `EAR: ${ear.toFixed(3)} | BlinkLow: ${s.challengeBlinkLow}`;
+                // Eye closing
+                if (ear < 0.20 && !s.challengeBlinkLow) {
+                    s.challengeBlinkLow = true;
+                }
 
-        if (ear < 0.30 && !s.challengeBlinkLow) {
-            s.challengeBlinkLow = true;
-            scoresEl.textContent += ' | CLOSED!';
-        }
-        if (ear >= 0.30 && s.challengeBlinkLow) {
-            s.challengeBlinkLow = false;
-            scoresEl.textContent += ' | BLINK DONE!';
-            return true;
-        }
-        return false;
-    }
-},
+                // Eye reopened after closing = blink complete
+                // Set blinkDoneFrames so holdFrames can count up
+                if (ear >= 0.22 && s.challengeBlinkLow) {
+                    s.challengeBlinkLow  = false;
+                    s.blinkDoneFrames    = (s.blinkDoneFrames || 0) + 8;
+                }
+
+                if ((s.blinkDoneFrames || 0) > 0) {
+                    s.blinkDoneFrames--;
+                    return true;  // stays true for 8 frames so holdFrames can count
+                }
+                return false;
+            }
+        },
         {
             id: 'turn_left',
             instruction: 'Turn your head LEFT',
@@ -168,9 +176,23 @@
             id: 'raise_eyebrows',
             instruction: 'Raise your eyebrows UP',
             check: (lm, s) => {
-                const dist = lm[159].y - lm[70].y;
-                if (!s.browBaseline) { s.browBaseline = dist; return false; }
-                return (dist - s.browBaseline) > 0.025;
+                // lm[159] = left eye top, lm[70] = left eyebrow
+                // When eyebrows raise, lm[70].y decreases so distance increases
+                const browDist = lm[159].y - lm[70].y;
+
+                // Build baseline over first 20 calls instead of just first call
+                // This avoids wrong baseline if person is already raising brows
+                if (!s.browBaselineFrames) s.browBaselineFrames = 0;
+                if (s.browBaselineFrames < 20) {
+                    s.browBaseline = s.browBaseline
+                        ? (s.browBaseline * s.browBaselineFrames + browDist) / (s.browBaselineFrames + 1)
+                        : browDist;
+                    s.browBaselineFrames++;
+                    return false;
+                }
+
+                // Need raise of 0.018 above baseline (lowered from 0.025)
+                return (browDist - s.browBaseline) > 0.018;
             }
         },
     ];
@@ -215,8 +237,10 @@
         state.challengeCompleted  = [false, false];
         state.challengeHoldFrames = 0;
         state.challengeBlinkLow   = false;
+        state.blinkDoneFrames     = 0;
         state.pitchBaseline       = null;
         state.browBaseline        = null;
+        state.browBaselineFrames  = 0;
         state.cooldown            = false;
         document.querySelectorAll('#cam-wrapper canvas').forEach(c => c.remove());
         overlayEl.style.display = 'none';
@@ -267,9 +291,11 @@
                     state.challengeHoldFrames = 0;
                     if (state.currentChallengeIdx < 1) {
                         state.currentChallengeIdx++;
-                        state.pitchBaseline  = null;
-                        state.browBaseline   = null;
-                        state.challengeBlinkLow = false;
+                        state.pitchBaseline       = null;
+                        state.browBaseline        = null;
+                        state.browBaselineFrames  = 0;
+                        state.challengeBlinkLow   = false;
+                        state.blinkDoneFrames     = 0;
                     }
                 }
             } else {
