@@ -129,6 +129,113 @@ class AttendanceService
     }
 
     /**
+     * Auto check-in after successful face identification.
+     * No face_verified param needed — identification IS the verification.
+     */
+    public function autoCheckIn(Student $student, float $livenessScore, float $matchScore): AttendanceLog
+    {
+        $today = Carbon::today();
+        $now   = Carbon::now();
+
+        // Check time window
+        $windowStart = Carbon::parse(config('attendance.check_in_window.start'));
+        $windowEnd   = Carbon::parse(config('attendance.check_in_window.end'));
+
+        if ($now->lt($windowStart) || $now->gt($windowEnd)) {
+            throw new \InvalidArgumentException(
+                'Outside allowed check-in hours (' .
+                config('attendance.check_in_window.start') . ' - ' .
+                config('attendance.check_in_window.end') . ')'
+            );
+        }
+
+        // Already checked in?
+        $existing = AttendanceLog::where('student_id', $student->id)
+            ->where('date', $today)
+            ->where('type', 'in')
+            ->first();
+
+        if ($existing) {
+            throw new DuplicateAttendanceException('Already checked in today at ' . $existing->recorded_time->format('h:i A'));
+        }
+
+        return DB::transaction(function () use ($student, $today, $now, $livenessScore, $matchScore) {
+            $log = AttendanceLog::create([
+                'student_id'        => $student->id,
+                'date'              => $today,
+                'type'              => 'in',
+                'recorded_time'     => $now,
+                'stated_time'       => null,
+                'ip_address'        => request()->ip(),
+                'is_flagged'        => false,
+                'face_verified'     => true,
+                'liveness_score'    => $livenessScore,
+                'verification_meta' => [
+                    'match_score'    => $matchScore,
+                    'spoof_passed'   => true,
+                    'auto_identified'=> true,
+                    'verified_at'    => $now->toIso8601String(),
+                ],
+                'submitted_by' => $this->resolveSubmittedByUserId(),
+            ]);
+
+            $this->createAuditTrail('create', $log);
+            return $log;
+        });
+    }
+
+    /**
+     * Auto check-out after successful face identification.
+     */
+    public function autoCheckOut(Student $student, float $livenessScore, float $matchScore): AttendanceLog
+    {
+        $today = Carbon::today();
+        $now   = Carbon::now();
+
+        $checkIn = AttendanceLog::where('student_id', $student->id)
+            ->where('date', $today)
+            ->where('type', 'in')
+            ->first();
+
+        if (!$checkIn) {
+            throw new \InvalidArgumentException('No check-in found for today. Check in first.');
+        }
+
+        $existingOut = AttendanceLog::where('student_id', $student->id)
+            ->where('date', $today)
+            ->where('type', 'out')
+            ->first();
+
+        if ($existingOut) {
+            throw new DuplicateAttendanceException('Already checked out today at ' . $existingOut->recorded_time->format('h:i A'));
+        }
+
+        return DB::transaction(function () use ($student, $today, $now, $livenessScore, $matchScore) {
+            $log = AttendanceLog::create([
+                'student_id'        => $student->id,
+                'date'              => $today,
+                'type'              => 'out',
+                'recorded_time'     => $now,
+                'stated_time'       => null,
+                'ip_address'        => request()->ip(),
+                'is_flagged'        => false,
+                'face_verified'     => true,
+                'liveness_score'    => $livenessScore,
+                'verification_meta' => [
+                    'match_score'    => $matchScore,
+                    'spoof_passed'   => true,
+                    'auto_identified'=> true,
+                    'verified_at'    => $now->toIso8601String(),
+                ],
+                'submitted_by' => $this->resolveSubmittedByUserId(),
+            ]);
+
+            $this->createAuditTrail('create', $log);
+            return $log;
+        });
+    }
+
+    /**
      * Admin override - allow manual correction of attendance
      */
     public function adminOverride(int $logId, string $newTime, ?string $reason = null): AttendanceLog

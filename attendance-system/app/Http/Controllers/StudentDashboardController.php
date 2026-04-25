@@ -21,6 +21,8 @@ class StudentDashboardController extends Controller
             'checkOutPublic',
             'registerFace',
             'serverTime',
+            'autoCheckIn',
+            'autoCheckOut'
         ]);
     }
 
@@ -247,5 +249,83 @@ class StudentDashboardController extends Controller
             'time' => now()->format('H:i:s'),
             'iso' => now()->toIso8601String(),
         ]);
+    }
+
+    public function autoCheckIn(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $validated = $request->validate([
+            'student_id'    => 'required|string|exists:students,student_id',
+            'liveness_score'=> 'required|numeric|min:0|max:100',
+            'match_score'   => 'required|numeric|min:0|max:100',
+        ]);
+
+        $student = Student::where('student_id', $validated['student_id'])->firstOrFail();
+
+        try {
+            $log = $this->attendanceService->autoCheckIn(
+                $student,
+                (float) $validated['liveness_score'],
+                (float) $validated['match_score']
+            );
+
+            return response()->json([
+                'ok'      => true,
+                'type'    => 'check_in',
+                'message' => 'Check-in recorded at ' . $log->recorded_time->format('h:i A'),
+                'time'    => $log->recorded_time->format('h:i A'),
+                'date'    => $log->date->format('d M Y'),
+                'student' => $student->full_name,
+            ]);
+        } catch (\App\Exceptions\DuplicateAttendanceException $e) {
+            return response()->json([
+                'ok'      => false,
+                'type'    => 'already_done',
+                'message' => $e->getMessage(),
+            ], 409);
+        } catch (\Exception $e) {
+            return response()->json([
+                'ok'      => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+    }
+
+    public function autoCheckOut(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $validated = $request->validate([
+            'student_id'    => 'required|string|exists:students,student_id',
+            'liveness_score'=> 'required|numeric|min:0|max:100',
+            'match_score'   => 'required|numeric|min:0|max:100',
+        ]);
+
+        $student = Student::where('student_id', $validated['student_id'])->firstOrFail();
+
+        try {
+            $log = $this->attendanceService->autoCheckOut(
+                $student,
+                (float) $validated['liveness_score'],
+                (float) $validated['match_score']
+            );
+
+            return response()->json([
+                'ok'      => true,
+                'type'    => 'check_out',
+                'message' => 'Check-out recorded at ' . $log->recorded_time->format('h:i A'),
+                'time'    => $log->recorded_time->format('h:i A'),
+                'date'    => $log->date->format('d M Y'),
+                'student' => $student->full_name,
+            ]);
+        } catch (\App\Exceptions\DuplicateAttendanceException $e) {
+            return response()->json([
+                'ok'      => false,
+                'type'    => 'already_done',
+                'message' => $e->getMessage(),
+            ], 409);
+        } catch (\Exception $e) {
+            return response()->json([
+                'ok'      => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
     }
 }

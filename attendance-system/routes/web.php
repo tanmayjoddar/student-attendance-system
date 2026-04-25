@@ -42,6 +42,15 @@ Route::get('/api/server-time', [StudentDashboardController::class, 'serverTime']
 // ML Face Verification Routes
 Route::post('/api/verify-face-ml', [\App\Http\Controllers\FaceVerificationController::class, 'verify']);
 Route::post('/api/register-face-ml', [\App\Http\Controllers\FaceVerificationController::class, 'register']);
+Route::post('/api/identify-face', [\App\Http\Controllers\FaceVerificationController::class, 'identify']);
+
+// Auto check-in/out after face identification (no student selection needed)
+Route::post('/attendance/auto-checkin', [StudentDashboardController::class, 'autoCheckIn'])
+    ->name('attendance.auto-checkin')
+    ->middleware('throttle:attendance');
+Route::post('/attendance/auto-checkout', [StudentDashboardController::class, 'autoCheckOut'])
+    ->name('attendance.auto-checkout')
+    ->middleware('throttle:attendance');
 
 Route::prefix('admin')
     ->name('admin.')

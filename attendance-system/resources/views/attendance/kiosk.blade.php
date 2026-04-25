@@ -1,9 +1,10 @@
 @extends('layouts.app')
 @section('content')
+
 <div class="d-flex flex-justify-between flex-items-center mb-4">
     <div>
         <h2 style="margin:0; font-size: 24px;">Internship Attendance Kiosk</h2>
-        <div class="text-muted">Walk-in attendance with MediaPipe face + liveness verification</div>
+        <div class="text-muted">Automatic face identification — no manual selection required</div>
     </div>
     <div class="d-flex" style="gap: 10px; align-items: stretch;">
         <a href="{{ route('student.register') }}" class="btn">New Student? Register</a>
@@ -15,113 +16,68 @@
 </div>
 
 <div class="Box mb-4">
-    <div class="Box-header"><h2>Select Student</h2></div>
+    <div class="Box-header"><h2>Face Identification</h2></div>
     <div class="Box-body">
-        <div class="form-group" style="max-width: 520px;">
-            <label class="form-label" for="student-id-select">Internship Student</label>
-            <select id="student-id-select" class="form-control">
-                <option value="">Choose student...</option>
-                @foreach($students as $student)
-                    <option value="{{ $student->student_id }}"
-                            data-face="{{ $student->face_registered_at ? '1' : '0' }}"
-                            data-has-checkin="{{ ($student->today_checkin_count ?? 0) > 0 ? '1' : '0' }}"
-                            data-has-checkout="{{ ($student->today_checkout_count ?? 0) > 0 ? '1' : '0' }}"
-                            data-signature='@json($student->face_signature ?? [])'>
-                        {{ $student->student_id }} - {{ $student->full_name }}
-                    </option>
-                @endforeach
-            </select>
-        </div>
-        <div id="student-face-status" class="text-small text-muted">Select a student to continue.</div>
-    </div>
-</div>
+        <div class="d-flex" style="gap:24px; align-items:flex-start; flex-wrap:wrap;">
 
-<div class="Box mb-4">
-    <div class="Box-header"><h2>Face Verification (MediaPipe)</h2></div>
-    <div class="Box-body">
-        <div class="d-flex" style="gap:16px; align-items:flex-start; flex-wrap: wrap;">
-            <div id="cam-wrapper" style="position:relative; width:320px; display:inline-block;">
-                <video id="cam" autoplay playsinline style="width:320px; display:block; border:1px solid var(--color-border-default); border-radius:6px;"></video>
-                <canvas id="overlay" width="320" height="240" style="display:none;"></canvas>
-                <div id="cam-overlay-text" style="
+            {{-- Camera --}}
+            <div id="cam-wrapper" style="position:relative; width:360px; display:inline-block;">
+                <video id="cam" autoplay playsinline
+                    style="width:360px; display:block; border:1px solid var(--color-border-default); border-radius:8px;">
+                </video>
+                <div id="cam-overlay" style="
                     display:none;
-                    position:absolute;
-                    top:0; left:0;
+                    position:absolute; top:0; left:0;
                     width:100%; height:100%;
-                    background:rgba(0,0,0,0.55);
-                    border-radius:6px;
+                    background:rgba(0,0,0,0.6);
+                    border-radius:8px;
                     color:white;
-                    font-size:18px;
                     font-weight:700;
                     text-align:center;
                     justify-content:center;
                     align-items:center;
                     flex-direction:column;
-                    gap:10px;
+                    gap:12px;
                     z-index:20;
                 "></div>
             </div>
-            <div style="min-width: 280px;">
-                <div class="mb-4">
-                    <div style="font-size: 12px; color: #656d76; margin-bottom: 4px;">Liveness Status</div>
-                    <div id="verify-status" style="font-weight: 600; font-size: 14px; color: #cf222e;">Not verified</div>
-                    <div style="font-size: 12px; color: #656d76; margin-top: 4px;">Complete the random challenges shown on screen</div>
+
+            {{-- Status Panel --}}
+            <div style="min-width:300px; flex:1;">
+
+                <div class="Box mb-3" style="padding:20px;">
+                    <div style="font-size:12px; color:#656d76; margin-bottom:6px;">Status</div>
+                    <div id="verify-status"
+                        style="font-weight:700; font-size:18px; color:#cf222e; line-height:1.3;">
+                        Press Start Camera to begin
+                    </div>
                 </div>
-                <div class="mb-4">
-                    <div style="font-size: 12px; color: #656d76; margin-bottom: 4px;">Liveness Score</div>
-                    <div id="verify-scores" style="font-weight: 600; font-size: 14px; color: #1f2328;">0%</div>
+
+                <div class="Box mb-3" style="padding:16px;">
+                    <div style="font-size:12px; color:#656d76; margin-bottom:6px;">Challenge Progress</div>
+                    <div id="verify-scores"
+                        style="font-weight:600; font-size:14px; color:#1f2328;">
+                        Task 1: waiting | Task 2: waiting
+                    </div>
                 </div>
-                <div class="d-flex" style="gap:8px; flex-wrap:wrap;">
-                    <button type="button" id="start-camera" class="btn">Start Camera</button>
-                    <button type="button" id="stop-camera" class="btn btn-danger">Stop Camera</button>
-                    <button type="button" id="register-face" class="btn btn-primary">Register Face</button>
-                    <button type="button" id="run-verify" class="btn btn-success">Verify</button>
+
+                <div class="mb-3">
+                    <button type="button" id="start-camera"
+                        class="btn btn-primary"
+                        style="padding:10px 24px; font-size:16px; width:100%;">
+                        Start Camera
+                    </button>
                 </div>
-                <div id="verify-message" class="mt-4 text-small text-muted"></div>
+
+                <div id="result-box" style="display:none;" class="Box">
+                    <div class="Box-body" id="result-content"></div>
+                </div>
+
             </div>
         </div>
     </div>
 </div>
 
-<div class="d-flex" style="gap:16px; flex-wrap: wrap;">
-    <div class="Box" style="flex:1; min-width: 300px;">
-        <div class="Box-header"><h2>Check In</h2></div>
-        <div class="Box-body">
-            <form method="POST" action="{{ route('attendance.check-in') }}" id="checkin-form">
-                @csrf
-                <input type="hidden" name="student_id" value="">
-                <div class="form-group">
-                    <label class="form-label">Stated Time (optional)</label>
-                    <input type="datetime-local" name="stated_time" class="form-control" max="{{ now()->format('Y-m-d\\TH:i') }}">
-                </div>
-                <input type="hidden" name="face_verified" value="0">
-                <input type="hidden" name="spoof_passed" value="0">
-                <input type="hidden" name="liveness_score" value="0">
-                <input type="hidden" name="match_score" value="0">
-                <input type="hidden" name="blink_count" value="0">
-                <input type="hidden" name="yaw_variance" value="0">
-                <button type="submit" class="btn btn-success">Submit Check In</button>
-            </form>
-        </div>
-    </div>
-
-    <div class="Box" style="flex:1; min-width: 300px;">
-        <div class="Box-header"><h2>Check Out</h2></div>
-        <div class="Box-body">
-            <form method="POST" action="{{ route('attendance.check-out') }}" id="checkout-form">
-                @csrf
-                <input type="hidden" name="student_id" value="">
-                <input type="hidden" name="face_verified" value="0">
-                <input type="hidden" name="spoof_passed" value="0">
-                <input type="hidden" name="liveness_score" value="0">
-                <input type="hidden" name="match_score" value="0">
-                <input type="hidden" name="blink_count" value="0">
-                <input type="hidden" name="yaw_variance" value="0">
-                <button type="submit" class="btn btn-primary">Submit Check Out</button>
-            </form>
-        </div>
-    </div>
-</div>
 @endsection
 
 @push('scripts')
@@ -130,794 +86,504 @@
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
 <script>
 (() => {
-    const MIN_LIVENESS = Number("{{ config('attendance.face.min_liveness_score', 75) }}");
-    const MIN_MATCH = Number("{{ config('attendance.face.min_match_score', 82) }}");
-    const MIN_MATCH_SAMPLES = 6;
+    const csrf    = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+    const camEl   = document.getElementById('cam');
+    const statusEl  = document.getElementById('verify-status');
+    const scoresEl  = document.getElementById('verify-scores');
+    const resultBox = document.getElementById('result-box');
+    const resultContent = document.getElementById('result-content');
+    const overlayEl = document.getElementById('cam-overlay');
 
-    const csrf = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-    const select = document.getElementById('student-id-select');
-    const faceStatus = document.getElementById('student-face-status');
-    const statusEl = document.getElementById('verify-status');
-    const scoresEl = document.getElementById('verify-scores');
-    const msgEl = document.getElementById('verify-message');
-    const camEl = document.getElementById('cam');
-
-    const forms = [document.getElementById('checkin-form'), document.getElementById('checkout-form')].filter(Boolean);
-    const checkinForm = document.getElementById('checkin-form');
-    const checkoutForm = document.getElementById('checkout-form');
-
+    // ─── State ───────────────────────────────────────────────────────────────
     const state = {
-        running: false,
-        landmarks: null,
-        signature: null,
-        blinkCount: 0,
-        wasBlinkLow: false,
-        yawMin: null,
-        yawMax: null,
-        livenessScore: 0,
-        matchScore: 0,
-        verified: false,
-        liveFrames: 0,
-        lastDetectionAt: 0,
-        verificationAt: 0,
-        hasCheckInToday: false,
-        hasCheckOutToday: false,
-        spoofPassed: false,
-        matchSamples: [],
-        mlVerifying: false,
-        // NEW CHALLENGE FIELDS:
-        challenges: [],           // 2 random challenges picked
-        currentChallengeIdx: 0,   // which challenge we're on (0 or 1)
-        challengeCompleted: [false, false],   // [false, false] → [true, true]
-        challengeBlinkLow: false, // for blink challenge
-        pitchBaseline: null,      // for nod challenge
-        browBaseline: null,       // for eyebrow challenge
-        challengeHoldFrames: 0,   // must hold pose for N frames
+        running:            false,
+        liveFrames:         0,
+        mlVerifying:        false,
+        verified:           false,
+        livenessScore:      0,
+        challenges:         [],
+        currentChallengeIdx:0,
+        challengeCompleted: [false, false],
+        challengeHoldFrames:0,
+        challengeBlinkLow:  false,
+        pitchBaseline:      null,
+        browBaseline:       null,
+        cooldown:           false,   // prevents rapid re-triggering
     };
 
-    // ============================================
-    // RANDOMIZED CHALLENGE LIVENESS SYSTEM
-    // ============================================
+    // ─── Challenge Definitions ────────────────────────────────────────────────
     const CHALLENGES = [
         {
             id: 'blink',
-            instruction: '👁 Blink your eyes',
-            check: (landmarks, state) => {
-                const leftEAR = eyeAspectRatio(landmarks, 159, 145, 33, 133);
-                const rightEAR = eyeAspectRatio(landmarks, 386, 374, 362, 263);
-                const ear = (leftEAR + rightEAR) / 2;
-                if (ear < 0.18 && !state.challengeBlinkLow) state.challengeBlinkLow = true;
-                if (ear >= 0.21 && state.challengeBlinkLow) {
-                    state.challengeBlinkLow = false;
-                    return true; // completed
-                }
+            instruction: 'Blink your eyes',
+            check: (lm, s) => {
+                const ear = (eyeAspectRatio(lm,159,145,33,133) + eyeAspectRatio(lm,386,374,362,263)) / 2;
+                if (ear < 0.18 && !s.challengeBlinkLow) s.challengeBlinkLow = true;
+                if (ear >= 0.21 && s.challengeBlinkLow) { s.challengeBlinkLow = false; return true; }
                 return false;
             }
         },
         {
             id: 'turn_left',
-            instruction: '⬅ Turn your head LEFT',
-            check: (landmarks, state) => {
-                const eyeMidX = (landmarks[33].x + landmarks[263].x) / 2;
-                const yaw = landmarks[1].x - eyeMidX;
-                return yaw < -0.04;
+            instruction: 'Turn your head LEFT',
+            check: (lm) => {
+                const mid = (lm[33].x + lm[263].x) / 2;
+                return (lm[1].x - mid) < -0.04;
             }
         },
         {
             id: 'turn_right',
-            instruction: '➡ Turn your head RIGHT',
-            check: (landmarks, state) => {
-                const eyeMidX = (landmarks[33].x + landmarks[263].x) / 2;
-                const yaw = landmarks[1].x - eyeMidX;
-                return yaw > 0.04;
+            instruction: 'Turn your head RIGHT',
+            check: (lm) => {
+                const mid = (lm[33].x + lm[263].x) / 2;
+                return (lm[1].x - mid) > 0.04;
             }
         },
         {
             id: 'open_mouth',
-            instruction: '😮 Open your mouth wide',
-            check: (landmarks, state) => {
-                // Upper lip = 13, Lower lip = 14
-                const upperLip = landmarks[13];
-                const lowerLip = landmarks[14];
-                const mouthOpen = Math.abs(upperLip.y - lowerLip.y);
-                return mouthOpen > 0.04;
-            }
+            instruction: 'Open your mouth wide',
+            check: (lm) => Math.abs(lm[13].y - lm[14].y) > 0.04
         },
         {
             id: 'nod',
-            instruction: '⬇ Nod your head DOWN',
-            check: (landmarks, state) => {
-                // Nose tip Y vs forehead Y — if nose drops relative to forehead
-                const noseTip = landmarks[1];
-                const forehead = landmarks[10];
-                const pitch = noseTip.y - forehead.y;
-                if (!state.pitchBaseline) state.pitchBaseline = pitch;
-                return (pitch - state.pitchBaseline) > 0.03;
+            instruction: 'Nod your head DOWN',
+            check: (lm, s) => {
+                const pitch = lm[1].y - lm[10].y;
+                if (!s.pitchBaseline) { s.pitchBaseline = pitch; return false; }
+                return (pitch - s.pitchBaseline) > 0.03;
             }
         },
         {
             id: 'raise_eyebrows',
-            instruction: '🤨 Raise your eyebrows UP',
-            check: (landmarks, state) => {
-                // Eyebrow landmark 70 (left) and 300 (right)
-                // Eye landmark 159 (left top)
-                const leftBrow = landmarks[70];
-                const leftEyeTop = landmarks[159];
-                const browEyeDist = leftEyeTop.y - leftBrow.y;
-
-                // Set baseline on first call
-                if (!state.browBaseline) {
-                    state.browBaseline = browEyeDist;
-                    return false;
-                }
-
-                // Need significant raise — 0.025 is more strict than 0.015
-                return (browEyeDist - state.browBaseline) > 0.025;
+            instruction: 'Raise your eyebrows UP',
+            check: (lm, s) => {
+                const dist = lm[159].y - lm[70].y;
+                if (!s.browBaseline) { s.browBaseline = dist; return false; }
+                return (dist - s.browBaseline) > 0.025;
             }
         },
     ];
 
-    // PICK 2 RANDOM CHALLENGES (different each time)
     function pickChallenges() {
-        const shuffled = [...CHALLENGES].sort(() => Math.random() - 0.5);
-        return shuffled.slice(0, 2);
+        return [...CHALLENGES].sort(() => Math.random() - 0.5).slice(0, 2);
     }
 
-    function distance(a, b) {
-        const dx = a.x - b.x;
-        const dy = a.y - b.y;
-        return Math.sqrt(dx * dx + dy * dy);
+    // ─── Helpers ──────────────────────────────────────────────────────────────
+    function dist(a, b) {
+        return Math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2);
     }
 
-    function eyeAspectRatio(landmarks, topIdx, bottomIdx, leftIdx, rightIdx) {
-        const vertical = distance(landmarks[topIdx], landmarks[bottomIdx]);
-        const horizontal = distance(landmarks[leftIdx], landmarks[rightIdx]);
-        return horizontal ? vertical / horizontal : 0;
+    function eyeAspectRatio(lm, top, bot, left, right) {
+        const v = dist(lm[top], lm[bot]);
+        const h = dist(lm[left], lm[right]);
+        return h ? v/h : 0;
     }
 
-function extractSignature(landmarks) {
-    const idx = [
-        // Core structure
-        1, 33, 263, 61, 291, 199, 152, 10, 234, 454,
-        // Eyebrows
-        70, 63, 105, 66, 300, 293, 334, 296,
-        // Eye lids (height gives eye openness)
-        159, 145, 386, 374,
-        // Left eye detail
-        157, 144, 160, 153,
-        // Right eye detail
-        384, 381, 387, 380,
-        // Nose bridge + width
-        6, 197, 195, 5, 4, 98, 327, 94,
-        // Lip detail
-        13, 14, 78, 308, 82, 312, 87, 317,
-        // Jaw line
-        172, 397, 136, 365, 150, 379,
-        // Temples
-        162, 389, 103, 332,
-        // Mid cheek
-        116, 345, 123, 352,
-        // Forehead width
-        54, 284, 21, 251,
-        // Chin detail
-        175, 171, 396, 176,
-        // Extra nose
-        48, 278, 115, 344,
-        // Philtrum / under nose
-        164, 393, 167, 394,
-    ];
+    function setStatus(msg, color = '#cf222e') {
+        statusEl.textContent = msg;
+        statusEl.style.color = color;
+    }
 
-    const leftEye   = landmarks[33];
-    const rightEye  = landmarks[263];
-    const chin      = landmarks[152];
-    const forehead  = landmarks[10];
+    function showResult(html) {
+        resultBox.style.display = 'block';
+        resultContent.innerHTML = html;
+    }
 
-    const eyeDist   = distance(leftEye, rightEye) || 1;
-    const faceH     = distance(chin, forehead)    || 1;
+    function hideResult() {
+        resultBox.style.display = 'none';
+        resultContent.innerHTML = '';
+    }
 
-    const centerX   = (leftEye.x + rightEye.x) / 2;
-    const centerY   = (leftEye.y + rightEye.y) / 2;
+    function resetChallengeState() {
+        state.liveFrames          = 0;
+        state.mlVerifying         = false;
+        state.verified            = false;
+        state.livenessScore       = 0;
+        state.challenges          = [];
+        state.currentChallengeIdx = 0;
+        state.challengeCompleted  = [false, false];
+        state.challengeHoldFrames = 0;
+        state.challengeBlinkLow   = false;
+        state.pitchBaseline       = null;
+        state.browBaseline        = null;
+        state.cooldown            = false;
+        document.querySelectorAll('#cam-wrapper canvas').forEach(c => c.remove());
+        overlayEl.style.display = 'none';
+        overlayEl.innerHTML     = '';
+    }
 
-    const vector = [];
-    idx.forEach(i => {
-        vector.push((landmarks[i].x - centerX) / eyeDist);
-        vector.push((landmarks[i].y - centerY) / faceH);   // Y normalized by face height
+    // ─── MediaPipe ────────────────────────────────────────────────────────────
+    const faceMesh = new FaceMesh({
+        locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`
     });
-
-    return vector;  // 80 points × 2 = 160 floats
-}
-
-    function similarityScore(a, b) {
-        if (!Array.isArray(a) || !Array.isArray(b) || !a.length || a.length !== b.length) {
-            return 0;
-        }
-
-        let dot = 0;
-        let magA = 0;
-        let magB = 0;
-
-        for (let i = 0; i < a.length; i++) {
-            dot += a[i] * b[i];
-            magA += a[i] * a[i];
-            magB += b[i] * b[i];
-        }
-
-        const rawCos = dot / (Math.sqrt(magA) * Math.sqrt(magB) || 1);
-        const MIN_COS = 0.80;
-        const MAX_COS = 1.00;
-        return Math.max(0, Math.min(100,
-            ((rawCos - MIN_COS) / (MAX_COS - MIN_COS)) * 100
-        ));
-    }
-
-    function syncForms() {
-        forms.forEach(form => {
-            form.querySelector('[name="student_id"]').value = select.value || '';
-            form.querySelector('[name="face_verified"]').value = state.verified ? '1' : '0';
-            form.querySelector('[name="spoof_passed"]').value = state.spoofPassed ? '1' : '0';
-            form.querySelector('[name="liveness_score"]').value = state.livenessScore.toFixed(2);
-            form.querySelector('[name="match_score"]').value = state.matchScore.toFixed(2);
-            form.querySelector('[name="blink_count"]').value = String(state.blinkCount);
-            const yawVariance = (state.yawMax !== null && state.yawMin !== null) ? (state.yawMax - state.yawMin) : 0;
-            form.querySelector('[name="yaw_variance"]').value = yawVariance.toFixed(4);
-        });
-
-        updateSubmitButtons();
-    }
-
-    function updateSubmitButtons() {
-        const selected = Boolean(select.value);
-        const verifyFresh = (Date.now() - state.verificationAt) <= 60000;
-        const verifiedReady = selected && state.verified && verifyFresh;
-
-        const allowCheckIn = verifiedReady && !state.hasCheckInToday;
-        const allowCheckOut = verifiedReady && state.hasCheckInToday && !state.hasCheckOutToday;
-
-        forms.forEach(form => {
-            const submitButton = form.querySelector('button[type="submit"]');
-            const isCheckInForm = form.id === 'checkin-form';
-            const allowSubmit = isCheckInForm ? allowCheckIn : allowCheckOut;
-
-            if (submitButton) {
-                submitButton.disabled = !allowSubmit;
-                submitButton.style.opacity = allowSubmit ? '1' : '0.55';
-                submitButton.style.cursor = allowSubmit ? 'pointer' : 'not-allowed';
-            }
-        });
-
-        if (!selected) {
-            msgEl.textContent = 'Select a student to enable attendance actions.';
-        } else if (state.hasCheckOutToday) {
-            msgEl.textContent = 'Attendance already completed for this student today.';
-        } else if (state.hasCheckInToday) {
-            msgEl.textContent = 'Check-in is already done. You can submit Check Out after verification.';
-        } else {
-            msgEl.textContent = 'Check In is available after successful verification.';
-        }
-    }
-
-    function setStatus(message, ok = false) {
-        statusEl.textContent = message;
-        statusEl.style.color = ok ? '#1a7f37' : '#cf222e';
-        statusEl.style.fontSize = '14px';
-        statusEl.style.fontWeight = '600';
-    }
-
-    async function fetchSignature(studentId) {
-        const option = select.options[select.selectedIndex];
-        const hasFace = option && option.dataset.face === '1';
-
-        state.hasCheckInToday = option ? option.dataset.hasCheckin === '1' : false;
-        state.hasCheckOutToday = option ? option.dataset.hasCheckout === '1' : false;
-
-        if (!studentId) {
-            state.signature = null;
-            state.hasCheckInToday = false;
-            state.hasCheckOutToday = false;
-            faceStatus.textContent = 'Select a student to continue.';
-            return;
-        }
-
-        if (!hasFace) {
-            state.signature = null;
-            faceStatus.textContent = 'No face profile registered. Use Register Face first.';
-            return;
-        }
-
-        const signaturePayload = option.dataset.signature || '[]';
-        try {
-            const parsed = JSON.parse(signaturePayload);
-            state.signature = Array.isArray(parsed) ? parsed : null;
-        } catch (_) {
-            state.signature = null;
-        }
-
-        if (!state.signature || !state.signature.length) {
-            faceStatus.textContent = 'Face profile is marked but signature is missing. Re-register face.';
-            return;
-        }
-
-        faceStatus.textContent = 'Face profile is available for this student.';
-    }
-
-    let camera;
-    let nativeStream = null;
-    let frameLoopHandle = null;
-    const faceMesh = new FaceMesh({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}` });
     faceMesh.setOptions({
-        maxNumFaces: 1,
-        refineLandmarks: true,
+        maxNumFaces:          1,
+        refineLandmarks:      true,
         minDetectionConfidence: 0.6,
-        minTrackingConfidence: 0.6,
+        minTrackingConfidence:  0.6,
     });
 
-    faceMesh.onResults((results) => {
-        if (!results.multiFaceLandmarks || !results.multiFaceLandmarks.length) {
-            state.landmarks = null;
-            state.verified = false;
-            state.spoofPassed = false;
-            state.matchScore = 0;
-            state.matchSamples = [];
-            syncForms();
+    faceMesh.onResults(results => {
+        if (!results.multiFaceLandmarks?.length) {
+            if (!state.mlVerifying && !state.cooldown) {
+                setStatus('No face detected. Position yourself in frame.');
+                scoresEl.textContent = 'Task 1: waiting | Task 2: waiting';
+            }
             return;
         }
 
-        const landmarks = results.multiFaceLandmarks[0];
-        state.landmarks = landmarks;
-        state.liveFrames += 1;
-        state.lastDetectionAt = Date.now();
+        const lm = results.multiFaceLandmarks[0];
+        state.liveFrames++;
 
-        // Pick challenges on first frame
+        // Pick challenges on first good frame
         if (state.liveFrames === 1 && state.challenges.length === 0) {
             state.challenges = pickChallenges();
             state.challengeCompleted = [false, false];
-            state.currentChallengeIdx = 0;
-            state.pitchBaseline = null;
-            state.browBaseline = null;
-            state.challengeHoldFrames = 0;
         }
 
-        const liveSignalOk = state.running && state.liveFrames >= 15;
+        if (state.mlVerifying || state.verified || state.cooldown) return;
 
-        // Only process challenges if not already verifying
-        if (!state.mlVerifying && !state.verified) {
-            const currentChallenge = state.challenges[state.currentChallengeIdx];
+        const liveSignalOk = state.liveFrames >= 15;
 
-            if (currentChallenge && !state.challengeCompleted[state.currentChallengeIdx]) {
-                const done = currentChallenge.check(landmarks, state);
-
-                if (done) {
-                    state.challengeHoldFrames++;
-                    if (state.challengeHoldFrames >= 5) { // 5 frames = more reliable
-                        state.challengeCompleted[state.currentChallengeIdx] = true;
-                        state.challengeHoldFrames = 0;
-
-                        if (state.currentChallengeIdx < 1) {
-                            state.currentChallengeIdx++;
-                            state.pitchBaseline = null;
-                            state.browBaseline = null;
-                            state.challengeBlinkLow = false;
-                        }
-                    }
-                } else {
+        // Process current challenge
+        const cur = state.challenges[state.currentChallengeIdx];
+        if (cur && !state.challengeCompleted[state.currentChallengeIdx]) {
+            const done = cur.check(lm, state);
+            if (done) {
+                state.challengeHoldFrames++;
+                if (state.challengeHoldFrames >= 5) {
+                    state.challengeCompleted[state.currentChallengeIdx] = true;
                     state.challengeHoldFrames = 0;
+                    if (state.currentChallengeIdx < 1) {
+                        state.currentChallengeIdx++;
+                        state.pitchBaseline  = null;
+                        state.browBaseline   = null;
+                        state.challengeBlinkLow = false;
+                    }
                 }
+            } else {
+                state.challengeHoldFrames = 0;
             }
         }
 
-        const allDone = state.challengeCompleted[0] && state.challengeCompleted[1];
-        state.spoofPassed = allDone && liveSignalOk;
-        state.livenessScore = (state.challengeCompleted[0] ? 50 : 0) + (state.challengeCompleted[1] ? 50 : 0);
+        const c1 = state.challengeCompleted[0];
+        const c2 = state.challengeCompleted[1];
+        const allDone = c1 && c2 && liveSignalOk;
 
-        const c1done = state.challengeCompleted[0];
-        const c2done = state.challengeCompleted[1];
+        state.livenessScore = (c1 ? 50 : 0) + (c2 ? 50 : 0);
+
+        // Update scores display
         const ch1 = state.challenges[0]?.instruction || '';
         const ch2 = state.challenges[1]?.instruction || '';
+        scoresEl.textContent = `Task 1: ${c1 ? 'Done' : 'Pending'} | Task 2: ${c2 ? 'Done' : 'Pending'}`;
 
-        // Trigger ML verification with countdown
-        if (state.spoofPassed && select.value && !state.mlVerifying && !state.verified) {
-            state.mlVerifying = true;
-
-            const overlayEl = document.getElementById('cam-overlay-text');
-
-            // Show overlay with instructions
-            overlayEl.style.display = 'flex';
-            overlayEl.innerHTML = `
-                <div style="font-size:15px; padding: 0 12px; text-align:center;">
-                    ✅ Liveness passed!<br>
-                    <span style="font-size:13px; font-weight:400;">Look straight at camera & stay still</span>
-                </div>
-                <div id="snap-countdown" style="font-size:64px; font-weight:900; line-height:1;">5</div>
-                <div style="font-size:12px; font-weight:400;">📸 Capturing in...</div>
-            `;
-            setStatus('✅ Both tasks done! Look straight — capturing soon...', true);
-
-            let countdown = 5;
-            const countdownEl = () => document.getElementById('snap-countdown');
-
-            const countdownInterval = setInterval(() => {
-                countdown--;
-                if (countdownEl()) countdownEl().textContent = countdown;
-
-                if (countdown <= 0) {
-                    clearInterval(countdownInterval);
-
-                    // Update overlay to "capturing"
-                    overlayEl.innerHTML = `
-                        <div style="font-size:18px;">📸 Capturing...</div>
-                    `;
-
-                    // Capture frame
-                    const canvas = document.createElement('canvas');
-                    canvas.width = camEl.videoWidth || 320;
-                    canvas.height = camEl.videoHeight || 240;
-                    canvas.getContext('2d').drawImage(camEl, 0, 0);
-
-                    // Show green border freeze effect
-                    canvas.style.position = 'absolute';
-                    canvas.style.top = '0';
-                    canvas.style.left = '0';
-                    canvas.style.width = '320px';
-                    canvas.style.height = '240px';
-                    canvas.style.border = '4px solid #1a7f37';
-                    canvas.style.borderRadius = '6px';
-                    canvas.style.zIndex = '10';
-                    canvas.style.boxShadow = '0 0 20px rgba(26, 127, 55, 0.6)';
-                    document.getElementById('cam-wrapper').appendChild(canvas);
-
-                    // Hide overlay text (canvas is showing frozen frame now)
-                    overlayEl.style.display = 'none';
-                    setStatus('📸 Captured! Verifying identity with AI...', false);
-
-                    canvas.toBlob(async (blob) => {
-                        try {
-                            const formData = new FormData();
-                            formData.append('image', blob, 'frame.jpg');
-                            formData.append('student_id', select.value);
-
-                            const resp = await fetch('/api/verify-face-ml', {
-                                method: 'POST',
-                                headers: { 'X-CSRF-TOKEN': csrf },
-                                body: formData,
-                            });
-
-                            const result = await resp.json();
-                            canvas.remove();
-                            overlayEl.style.display = 'none';
-
-                            if (result.verified) {
-                                state.verified = true;
-                                state.verificationAt = Date.now();
-                                state.matchScore = result.confidence;
-                                setStatus(`✅ Identity verified! Confidence: ${result.confidence.toFixed(1)}%`, true);
-                            } else {
-                                state.verified = false;
-                                state.matchScore = 0;
-                                const dist = result.distance !== undefined ? ` (distance: ${result.distance})` : '';
-                                setStatus(`❌ Face not matched${dist}. Look straight and retry.`, false);
-                                setTimeout(() => {
-                                    state.mlVerifying = false;
-                                    // Reset challenges so user must redo them
-                                    state.challengeCompleted = [false, false];
-                                    state.currentChallengeIdx = 0;
-                                    state.pitchBaseline = null;
-                                    state.browBaseline = null;
-                                    state.challengeBlinkLow = false;
-                                    state.challenges = pickChallenges(); // new random challenges
-                                }, 4000);
-                            }
-                        } catch (e) {
-                            canvas.remove();
-                            overlayEl.style.display = 'none';
-                            state.verified = false;
-                            state.matchScore = 0;
-                            setStatus('⚠️ Verification error. Check ML service is running.', false);
-                            setTimeout(() => {
-                                state.mlVerifying = false;
-                                state.challengeCompleted = [false, false];
-                                state.currentChallengeIdx = 0;
-                                state.pitchBaseline = null;
-                                state.browBaseline = null;
-                                state.challengeBlinkLow = false;
-                                state.challenges = pickChallenges();
-                            }, 3000);
-                        }
-                        syncForms();
-                    }, 'image/jpeg', 0.92);
-                }
-            }, 1000);
+        // Update status
+        if (!liveSignalOk) {
+            setStatus('Hold still — detecting face...');
+        } else if (!c1) {
+            setStatus(ch1);
+        } else if (!c2) {
+            setStatus(ch2);
         }
 
-        if (state.verified) {
-            state.verificationAt = Date.now();
+        // All done — trigger identification
+        if (allDone) {
+            triggerIdentification();
         }
-
-        // Scores display
-        scoresEl.textContent = state.verified
-            ? `Liveness 100% | AI Match ${state.matchScore.toFixed(1)}%`
-            : `Task 1: ${c1done ? '✅' : '⏳'} | Task 2: ${c2done ? '✅' : '⏳'}`;
-        scoresEl.style.color = state.verified ? '#1a7f37' : '#1f2328';
-
-        // Status message
-        if (state.verified) {
-            setStatus(`✅ Identity verified! Confidence: ${state.matchScore.toFixed(1)}%`, true);
-        } else if (state.mlVerifying) {
-            // Don't overwrite countdown messages
-        } else if (!liveSignalOk) {
-            setStatus('Position your face in frame...', false);
-        } else if (!c1done) {
-            setStatus(ch1, false);
-        } else if (!c2done) {
-            setStatus(ch2, false);
-        }
-
-        syncForms();
     });
+
+    // ─── Identification Flow ──────────────────────────────────────────────────
+    function triggerIdentification() {
+        if (state.mlVerifying || state.cooldown) return;
+        state.mlVerifying = true;
+        state.cooldown    = true;
+
+        // Show countdown overlay
+        overlayEl.style.display = 'flex';
+        overlayEl.innerHTML = `
+            <div style="font-size:15px; padding:0 16px; text-align:center;">
+                Liveness confirmed<br>
+                <span style="font-size:13px; font-weight:400;">Look straight at camera and stay still</span>
+            </div>
+            <div id="snap-countdown" style="font-size:72px; font-weight:900; line-height:1;">5</div>
+            <div style="font-size:12px; font-weight:400;">Capturing in...</div>
+        `;
+        setStatus('Liveness confirmed — look straight, stay still.', '#1a7f37');
+
+        let countdown = 5;
+        const countdownInterval = setInterval(() => {
+            countdown--;
+            const el = document.getElementById('snap-countdown');
+            if (el) el.textContent = countdown;
+
+            if (countdown <= 0) {
+                clearInterval(countdownInterval);
+                captureAndIdentify();
+            }
+        }, 1000);
+    }
+
+    async function captureAndIdentify() {
+        // Show capturing state
+        overlayEl.innerHTML = `<div style="font-size:18px;">Capturing face...</div>`;
+
+        // Capture frame
+        const canvas  = document.createElement('canvas');
+        canvas.width  = camEl.videoWidth  || 360;
+        canvas.height = camEl.videoHeight || 270;
+        canvas.getContext('2d').drawImage(camEl, 0, 0);
+
+        // Freeze effect — green border
+        canvas.style.cssText = `
+            position:absolute; top:0; left:0;
+            width:360px; height:100%;
+            border:4px solid #1a7f37;
+            border-radius:8px;
+            box-shadow:0 0 24px rgba(26,127,55,0.7);
+            z-index:10;
+        `;
+        document.getElementById('cam-wrapper').appendChild(canvas);
+        overlayEl.style.display = 'none';
+        setStatus('Identifying person...', '#656d76');
+
+        canvas.toBlob(async blob => {
+            const formData = new FormData();
+            formData.append('image', blob, 'frame.jpg');
+
+            try {
+                const resp = await fetch('/api/identify-face', {
+                    method:  'POST',
+                    headers: { 'X-CSRF-TOKEN': csrf },
+                    body:    formData,
+                });
+
+                const identification = await resp.json();
+                canvas.remove();
+
+                if (!identification.ok || !identification.matched) {
+                    handleNotMatched(identification.message || 'No match found.');
+                    return;
+                }
+
+                // Matched — now auto check-in or check-out
+                await handleMatched(identification);
+
+            } catch (e) {
+                canvas.remove();
+                handleError('Network error. Check ML service is running.');
+            }
+        }, 'image/jpeg', 0.92);
+    }
+
+    async function handleMatched(identification) {
+        const studentId  = identification.user_id;
+        const confidence = identification.confidence;
+
+        setStatus(`Identified: ${studentId} (${confidence.toFixed(1)}% confidence)`, '#1a7f37');
+
+        // First try check-in, then check-out
+        const checkInResp = await fetch('/attendance/auto-checkin', {
+            method:  'POST',
+            headers: {
+                'X-CSRF-TOKEN':  csrf,
+                'Content-Type':  'application/json',
+                'Accept':        'application/json',
+            },
+            body: JSON.stringify({
+                student_id:    studentId,
+                liveness_score: state.livenessScore,
+                match_score:   confidence,
+            }),
+        });
+
+        const checkInResult = await checkInResp.json();
+
+        if (checkInResult.ok) {
+            // Check-in succeeded
+            showSuccessResult(checkInResult, 'Check-In');
+            setStatus(`Welcome, ${checkInResult.student}`, '#1a7f37');
+            scheduleReset(8000);
+            return;
+        }
+
+        if (checkInResult.type === 'already_done') {
+            // Already checked in — try check-out
+            const checkOutResp = await fetch('/attendance/auto-checkout', {
+                method:  'POST',
+                headers: {
+                    'X-CSRF-TOKEN':  csrf,
+                    'Content-Type':  'application/json',
+                    'Accept':        'application/json',
+                },
+                body: JSON.stringify({
+                    student_id:    studentId,
+                    liveness_score: state.livenessScore,
+                    match_score:   confidence,
+                }),
+            });
+
+            const checkOutResult = await checkOutResp.json();
+
+            if (checkOutResult.ok) {
+                showSuccessResult(checkOutResult, 'Check-Out');
+                setStatus(`Goodbye, ${checkOutResult.student}`, '#1a7f37');
+                scheduleReset(8000);
+                return;
+            }
+
+            if (checkOutResult.type === 'already_done') {
+                showAlreadyDone(checkOutResult.message, studentId);
+                scheduleReset(6000);
+                return;
+            }
+
+            showError(checkOutResult.message || 'Check-out failed.');
+            scheduleReset(5000);
+            return;
+        }
+
+        showError(checkInResult.message || 'Check-in failed.');
+        scheduleReset(5000);
+    }
+
+    function handleNotMatched(message) {
+        setStatus('Face not recognized. Please re-register or try again.', '#cf222e');
+        showResult(`
+            <div style="text-align:center; padding:12px;">
+                <div style="font-size:16px; font-weight:700; color:#cf222e; margin-bottom:8px;">
+                    Not Recognized
+                </div>
+                <div style="font-size:13px; color:#656d76;">${message}</div>
+                <div style="font-size:12px; color:#656d76; margin-top:8px;">
+                    Retrying in 5 seconds...
+                </div>
+            </div>
+        `);
+        scheduleReset(5000);
+    }
+
+    function handleError(message) {
+        setStatus('Error: ' + message, '#cf222e');
+        showResult(`
+            <div style="text-align:center; padding:12px;">
+                <div style="font-size:14px; font-weight:700; color:#cf222e;">${message}</div>
+                <div style="font-size:12px; color:#656d76; margin-top:8px;">Retrying in 5 seconds...</div>
+            </div>
+        `);
+        scheduleReset(5000);
+    }
+
+    function showSuccessResult(result, type) {
+        const color = type === 'Check-In' ? '#1a7f37' : '#0969da';
+        showResult(`
+            <div style="text-align:center; padding:16px;">
+                <div style="font-size:20px; font-weight:900; color:${color}; margin-bottom:8px;">
+                    ${type} Successful
+                </div>
+                <div style="font-size:16px; font-weight:700; margin-bottom:4px;">${result.student}</div>
+                <div style="font-size:14px; color:#656d76;">${result.date}</div>
+                <div style="font-size:28px; font-weight:900; color:${color}; margin-top:8px;">
+                    ${result.time}
+                </div>
+                <div style="font-size:12px; color:#656d76; margin-top:12px;">
+                    Resetting in 8 seconds...
+                </div>
+            </div>
+        `);
+    }
+
+    function showAlreadyDone(message, studentId) {
+        showResult(`
+            <div style="text-align:center; padding:12px;">
+                <div style="font-size:16px; font-weight:700; color:#9a6700; margin-bottom:8px;">
+                    Attendance Already Recorded
+                </div>
+                <div style="font-size:13px; color:#656d76;">${message}</div>
+                <div style="font-size:12px; color:#656d76; margin-top:8px;">Resetting in 6 seconds...</div>
+            </div>
+        `);
+    }
+
+    function showError(message) {
+        showResult(`
+            <div style="text-align:center; padding:12px;">
+                <div style="font-size:14px; font-weight:700; color:#cf222e;">${message}</div>
+                <div style="font-size:12px; color:#656d76; margin-top:8px;">Resetting in 5 seconds...</div>
+            </div>
+        `);
+    }
+
+    function scheduleReset(ms) {
+        setTimeout(() => {
+            hideResult();
+            resetChallengeState();
+            setStatus('Ready — complete the challenges to record attendance.');
+            scoresEl.textContent = 'Task 1: waiting | Task 2: waiting';
+        }, ms);
+    }
+
+    // ─── Camera Start ─────────────────────────────────────────────────────────
+    let camera = null;
+    let nativeStream = null;
+    let frameLoopHandle = null;
 
     async function startCamera() {
         if (state.running) return;
+        document.getElementById('start-camera').disabled = true;
+        document.getElementById('start-camera').textContent = 'Starting...';
 
         const runFrameLoop = async () => {
             if (!state.running) return;
-            try {
-                await faceMesh.send({ image: camEl });
-            } catch (_) {
-                // Ignore transient frame errors and continue streaming.
-            }
+            try { await faceMesh.send({ image: camEl }); } catch (_) {}
             frameLoopHandle = requestAnimationFrame(runFrameLoop);
-        };
-
-        const resetVerificationState = () => {
-            state.running = true;
-            state.liveFrames = 0;
-            state.lastDetectionAt = 0;
-            state.verificationAt = 0;
-            state.verified = false;
-            state.spoofPassed = false;
-            state.matchScore = 0;
-            state.matchSamples = [];
-            state.mlVerifying = false;
-            state.blinkCount = 0;
-            state.yawMin = null;
-            state.yawMax = null;
-            // NEW:
-            state.challenges = [];
-            state.currentChallengeIdx = 0;
-            state.challengeCompleted = [false, false];
-            state.challengeBlinkLow = false;
-            state.pitchBaseline = null;
-            state.browBaseline = null;
-            state.challengeHoldFrames = 0;
-            syncForms();
         };
 
         try {
             camera = new Camera(camEl, {
-                onFrame: async () => {
-                    await faceMesh.send({ image: camEl });
-                },
-                width: 320,
-                height: 240,
+                onFrame: async () => { await faceMesh.send({ image: camEl }); },
+                width: 360, height: 270,
             });
-
             await camera.start();
-            resetVerificationState();
-            setStatus('Camera started. Complete liveness challenge.');
+            state.running = true;
+            resetChallengeState();
+            setStatus('Look at the camera and follow the instructions.');
+            document.getElementById('start-camera').style.display = 'none';
             return;
         } catch (_) {
             camera = null;
         }
 
-        // Fallback path for browsers where MediaPipe Camera helper fails.
+        // Fallback
         try {
             nativeStream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                    width: { ideal: 320 },
-                    height: { ideal: 240 },
-                    facingMode: 'user',
-                },
+                video: { width: { ideal: 360 }, height: { ideal: 270 }, facingMode: 'user' },
                 audio: false,
             });
-
             camEl.srcObject = nativeStream;
             await camEl.play();
-
-            resetVerificationState();
+            state.running = true;
+            resetChallengeState();
             frameLoopHandle = requestAnimationFrame(runFrameLoop);
-            setStatus('Camera started (fallback mode). Complete liveness challenge.');
-        } catch (error) {
+            setStatus('Look at the camera and follow the instructions.');
+            document.getElementById('start-camera').style.display = 'none';
+        } catch (err) {
             state.running = false;
-            syncForms();
-            setStatus('Camera failed to start. Allow camera permission and retry.');
-            msgEl.textContent = error && error.message ? error.message : 'Could not access camera device.';
+            setStatus('Camera failed. Allow camera permission and try again.', '#cf222e');
+            document.getElementById('start-camera').disabled = false;
+            document.getElementById('start-camera').textContent = 'Start Camera';
         }
     }
-
-    function stopCamera() {
-        if (camera && typeof camera.stop === 'function') {
-            camera.stop();
-        }
-
-        camera = null;
-
-        if (nativeStream) {
-            nativeStream.getTracks().forEach(track => track.stop());
-            nativeStream = null;
-        }
-
-        if (frameLoopHandle !== null) {
-            cancelAnimationFrame(frameLoopHandle);
-            frameLoopHandle = null;
-        }
-
-        if (camEl.srcObject) {
-            camEl.srcObject.getTracks().forEach(track => track.stop());
-            camEl.srcObject = null;
-        }
-
-        state.running = false;
-        state.landmarks = null;
-        state.verified = false;
-        state.spoofPassed = false;
-        state.liveFrames = 0;
-        state.lastDetectionAt = 0;
-        state.verificationAt = 0;
-        state.matchScore = 0;
-        state.matchSamples = [];
-        state.mlVerifying = false;
-        state.blinkCount = 0;
-        state.yawMin = null;
-        state.yawMax = null;
-        // NEW:
-        state.challenges = [];
-        state.currentChallengeIdx = 0;
-        state.challengeCompleted = [false, false];
-        state.challengeBlinkLow = false;
-        state.pitchBaseline = null;
-        state.browBaseline = null;
-        state.challengeHoldFrames = 0;
-
-        // Hide overlay
-        const overlayEl = document.getElementById('cam-overlay-text');
-        if (overlayEl) overlayEl.style.display = 'none';
-
-        // Remove any frozen canvas elements
-        document.querySelectorAll('#cam-wrapper canvas').forEach(c => c.remove());
-
-        syncForms();
-        setStatus('Camera stopped. Start camera to continue.', false);
-    }
-
-    async function registerFace() {
-        if (!select.value) {
-            setStatus('Select student first.');
-            return;
-        }
-
-        if (!state.landmarks) {
-            setStatus('No face detected for registration.');
-            return;
-        }
-
-        const signature = extractSignature(state.landmarks);
-        const resp = await fetch("{{ route('attendance.face-register') }}", {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': csrf,
-                'Accept': 'application/json',
-            },
-            body: JSON.stringify({
-                signature,
-                student_id: select.value,
-            })
-        });
-
-        if (resp.ok) {
-            state.signature = signature;
-            msgEl.textContent = 'Face profile registered for selected student.';
-            setStatus('Face profile registered', true);
-            const selected = select.options[select.selectedIndex];
-            if (selected) selected.dataset.face = '1';
-            faceStatus.textContent = 'Face profile is available for this student.';
-        } else {
-            setStatus('Registration failed.');
-        }
-    }
-
-    select.addEventListener('change', async () => {
-        await fetchSignature(select.value);
-        state.verified = false;
-        state.spoofPassed = false;
-        state.matchScore = 0;
-        state.matchSamples = [];
-        state.livenessScore = 0;
-        state.blinkCount = 0;
-        state.yawMin = null;
-        state.yawMax = null;
-        state.liveFrames = 0;
-        state.verificationAt = 0;
-        state.mlVerifying = false;
-        // NEW:
-        state.challenges = [];
-        state.currentChallengeIdx = 0;
-        state.challengeCompleted = [false, false];
-        state.challengeBlinkLow = false;
-        state.pitchBaseline = null;
-        state.browBaseline = null;
-        state.challengeHoldFrames = 0;
-        syncForms();
-    });
 
     document.getElementById('start-camera').addEventListener('click', startCamera);
-    document.getElementById('stop-camera').addEventListener('click', stopCamera);
-    document.getElementById('register-face').addEventListener('click', registerFace);
-    document.getElementById('run-verify').addEventListener('click', () => {
-        if (!state.running) {
-            setStatus('Start camera first.');
-            return;
-        }
 
-        if (!state.spoofPassed) {
-            setStatus('Complete both liveness challenges first.');
-            return;
-        }
-
-        if (!state.signature) {
-            setStatus('Registered face vector missing for selected student.');
-            return;
-        }
-
-        setStatus(state.verified ? 'Verified' : 'Verification incomplete', state.verified);
-    });
-
-    forms.forEach(form => {
-        form.addEventListener('submit', (event) => {
-            const verifyFresh = (Date.now() - state.verificationAt) <= 60000;
-            const isCheckInForm = form.id === 'checkin-form';
-
-            if (!select.value) {
-                event.preventDefault();
-                setStatus('Please select a student first.');
-                return;
-            }
-
-            if (!state.verified || !verifyFresh) {
-                event.preventDefault();
-                setStatus('Attendance blocked: complete live MediaPipe verification first.');
-                return;
-            }
-
-            if (isCheckInForm && state.hasCheckInToday) {
-                event.preventDefault();
-                setStatus('Check-in already submitted for this student today.');
-                return;
-            }
-
-            if (!isCheckInForm && !state.hasCheckInToday) {
-                event.preventDefault();
-                setStatus('Check-out blocked: submit check-in first.');
-                return;
-            }
-
-            if (!isCheckInForm && state.hasCheckOutToday) {
-                event.preventDefault();
-                setStatus('Check-out already submitted for this student today.');
-            }
-        });
-    });
-
+    // Server time
     setInterval(() => {
         fetch("{{ route('api.server-time') }}")
             .then(r => r.json())
-            .then(data => {
-                document.getElementById('server-time').textContent = data.time;
-            })
+            .then(d => { document.getElementById('server-time').textContent = d.time; })
             .catch(() => {});
     }, 30000);
 
-    syncForms();
-    updateSubmitButtons();
 })();
 </script>
 @endpush

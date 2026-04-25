@@ -67,16 +67,53 @@
                 </div>
             </div>
 
-            <div class="form-group">
-                <label class="form-label">Photo (required)</label>
-                <input id="photo-input" class="form-control" type="file" name="photo" accept="image/*" required>
-                <input type="hidden" id="face-signature" name="face_signature" value="{{ old('face_signature') }}">
-                <div class="text-small text-muted" style="margin-top: 6px;">Max 2MB image file.</div>
-                <div id="photo-vector-status" class="text-small text-muted" style="margin-top: 6px;">Upload clear front-face photo to generate secure face vector.</div>
-                <img id="photo-preview" alt="Photo preview" style="margin-top:10px; max-width: 220px; border-radius: 6px; border: 1px solid var(--color-border-default); display:none;">
-                @error('photo')<div class="text-small" style="color: var(--color-danger-fg); margin-top:4px;">{{ $message }}</div>@enderror
-                @error('face_signature')<div class="text-small" style="color: var(--color-danger-fg); margin-top:4px;">{{ $message }}</div>@enderror
-            </div>
+      <div class="form-group">
+    <label class="form-label">Face Photo (required)</label>
+
+    {{-- Hidden inputs --}}
+    <input type="hidden" id="face-photo-data" name="face_photo_data" value="{{ old('face_photo_data') }}">
+    <input type="hidden" id="face-signature" name="face_signature" value="{{ old('face_signature') }}">
+
+    {{-- Camera wrapper --}}
+    <div id="reg-cam-wrapper" style="position:relative; width:320px; display:inline-block; margin-bottom:12px;">
+        <video id="reg-cam" autoplay playsinline
+            style="width:320px; display:none; border:1px solid var(--color-border-default); border-radius:6px;">
+        </video>
+        <canvas id="reg-capture-preview" width="320" height="240"
+            style="display:none; border:2px solid #1a7f37; border-radius:6px;">
+        </canvas>
+        <div id="reg-overlay" style="
+            display:none; position:absolute; top:0; left:0;
+            width:100%; height:100%;
+            background:rgba(0,0,0,0.55);
+            border-radius:6px; color:white;
+            font-weight:700; text-align:center;
+            justify-content:center; align-items:center;
+            flex-direction:column; gap:8px; z-index:10;
+        "></div>
+    </div>
+
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+        <button type="button" id="reg-open-camera" class="btn">Open Camera</button>
+        <button type="button" id="reg-capture-btn" class="btn btn-success" style="display:none;">
+            Capture Photo
+        </button>
+        <button type="button" id="reg-retake-btn" class="btn" style="display:none;">
+            Retake
+        </button>
+    </div>
+
+    <div id="reg-status" class="text-small text-muted">
+        Open camera to take your photo for face registration.
+    </div>
+
+    @error('face_photo_data')
+        <div class="text-small" style="color:var(--color-danger-fg); margin-top:4px;">{{ $message }}</div>
+    @enderror
+    @error('face_signature')
+        <div class="text-small" style="color:var(--color-danger-fg); margin-top:4px;">{{ $message }}</div>
+    @enderror
+</div>
 
             <button id="register-submit" type="submit" class="btn btn-primary">Register Myself</button>
         </form>
@@ -87,219 +124,189 @@
 @push('scripts')
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
 <script>
+// ─── Registration Camera ──────────────────────────────────────────────────
 (() => {
-    const SIGNATURE_POINT_INDEXES = [
-        1, 33, 263, 61, 291, 199, 152, 10, 234, 454,
-        70, 63, 105, 66, 300, 293, 334, 296,
-        159, 145, 386, 374,
-        157, 144, 160, 153,
-        384, 381, 387, 380,
-        6, 197, 195, 5, 4, 98, 327, 94,
-        13, 14, 78, 308, 82, 312, 87, 317,
-        172, 397, 136, 365, 150, 379,
-        162, 389, 103, 332,
-        116, 345, 123, 352,
-        54, 284, 21, 251,
-        175, 171, 396, 176,
-        48, 278, 115, 344,
-        164, 393, 167, 394,
-    ];
-    const EXPECTED_SIGNATURE_LENGTH = SIGNATURE_POINT_INDEXES.length * 2;
+    const regCam          = document.getElementById('reg-cam');
+    const regPreview      = document.getElementById('reg-capture-preview');
+    const regOverlay      = document.getElementById('reg-overlay');
+    const regStatus       = document.getElementById('reg-status');
+    const regOpenBtn      = document.getElementById('reg-open-camera');
+    const regCaptureBtn   = document.getElementById('reg-capture-btn');
+    const regRetakeBtn    = document.getElementById('reg-retake-btn');
+    const photoDataInput  = document.getElementById('face-photo-data');
+    const signatureInput  = document.getElementById('face-signature');
+    const submitBtn       = document.getElementById('register-submit');
 
-    const form = document.getElementById('self-register-form');
-    const photoInput = document.getElementById('photo-input');
-    const signatureInput = document.getElementById('face-signature');
-    const statusEl = document.getElementById('photo-vector-status');
-    const previewEl = document.getElementById('photo-preview');
-    const submitBtn = document.getElementById('register-submit');
+    let regStream    = null;
+    let regFaceMesh  = null;
+    let regFrameLoop = null;
+    let captureReady = false;
 
-    let faceMesh;
-
-    function setStatus(message, ok = false) {
-        statusEl.textContent = message;
-        statusEl.style.color = ok ? '#1a7f37' : '#cf222e';
+    function setRegStatus(msg, ok = false) {
+        regStatus.textContent = msg;
+        regStatus.style.color = ok ? '#1a7f37' : '#656d76';
     }
 
     function toggleSubmit(enabled) {
         submitBtn.disabled = !enabled;
-        submitBtn.style.opacity = enabled ? '1' : '0.55';
-        submitBtn.style.cursor = enabled ? 'pointer' : 'not-allowed';
+        submitBtn.style.opacity  = enabled ? '1' : '0.55';
+        submitBtn.style.cursor   = enabled ? 'pointer' : 'not-allowed';
     }
 
-    function distance(a, b) {
-        const dx = a.x - b.x;
-        const dy = a.y - b.y;
-        return Math.sqrt((dx * dx) + (dy * dy));
+    toggleSubmit(false);
+
+    // Distance helper (same as kiosk)
+    function dist(a, b) {
+        return Math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2);
     }
 
-function extractSignature(landmarks) {
-    const leftEye  = landmarks[33];
-    const rightEye = landmarks[263];
-    const chin     = landmarks[152];
-    const forehead = landmarks[10];
-
-    const eyeDist  = distance(leftEye, rightEye) || 1;
-    const faceH    = distance(chin, forehead)    || 1;
-    const centerX  = (leftEye.x + rightEye.x) / 2;
-    const centerY  = (leftEye.y + rightEye.y) / 2;
-
-    const vector = [];
-    SIGNATURE_POINT_INDEXES.forEach(i => {
-        const point = landmarks[i];
-        if (!point) {
-            return;
-        }
-
-        const nx = (point.x - centerX) / eyeDist;
-        const ny = (point.y - centerY) / faceH;
-
-        if (!Number.isFinite(nx) || !Number.isFinite(ny)) {
-            return;
-        }
-
-        vector.push(nx);
-        vector.push(ny);
-    });
-
-    return vector.map(v => Number(v.toFixed(6)));
-}
-
-    function fileToImage(file) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-                const image = new Image();
-                image.onload = () => resolve(image);
-                image.onerror = () => reject(new Error('Failed to decode uploaded image.'));
-                image.src = reader.result;
-            };
-            reader.onerror = () => reject(new Error('Could not read uploaded image.'));
-            reader.readAsDataURL(file);
+    // Extract face signature from landmarks
+    function extractSignature(landmarks) {
+        const idx = [
+            1,33,263,61,291,199,152,10,234,454,
+            70,63,105,66,300,293,334,296,
+            159,145,386,374,157,144,160,153,
+            384,381,387,380,6,197,195,5,4,98,327,94,
+            13,14,78,308,82,312,87,317,
+            172,397,136,365,150,379,
+            162,389,103,332,116,345,123,352,
+            54,284,21,251,175,171,396,176,
+            48,278,115,344,164,393,167,394,
+        ];
+        const le = landmarks[33], re = landmarks[263];
+        const ch = landmarks[152], fh = landmarks[10];
+        const eyeDist = dist(le, re) || 1;
+        const faceH   = dist(ch, fh) || 1;
+        const cx = (le.x + re.x) / 2;
+        const cy = (le.y + re.y) / 2;
+        const v = [];
+        idx.forEach(i => {
+            v.push((landmarks[i].x - cx) / eyeDist);
+            v.push((landmarks[i].y - cy) / faceH);
         });
+        return v.map(n => Number(n.toFixed(6)));
     }
 
-    async function getFaceMesh() {
-        if (!faceMesh) {
-            faceMesh = new FaceMesh({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}` });
-            faceMesh.setOptions({
-                maxNumFaces: 1,
-                refineLandmarks: true,
-                minDetectionConfidence: 0.5,
-                minTrackingConfidence: 0.5,
+    // Open camera
+    regOpenBtn.addEventListener('click', async () => {
+        try {
+            regStream = await navigator.mediaDevices.getUserMedia({
+                video: { width: { ideal: 320 }, height: { ideal: 240 }, facingMode: 'user' },
+                audio: false,
             });
+            regCam.srcObject = regStream;
+            await regCam.play();
+            regCam.style.display = 'block';
+            regOpenBtn.style.display   = 'none';
+            regCaptureBtn.style.display = 'inline-block';
+            setRegStatus('Camera ready. Position your face clearly, then capture.');
+            captureReady = true;
+        } catch (e) {
+            setRegStatus('Camera failed: ' + (e.message || 'Permission denied'));
         }
+    });
 
-        return faceMesh;
-    }
+    // Capture button
+    regCaptureBtn.addEventListener('click', async () => {
+        if (!captureReady) return;
 
-    async function buildVectorFromPhoto(file) {
-        const image = await fileToImage(file);
-        const mesh = await getFaceMesh();
+        regCaptureBtn.disabled = true;
+        setRegStatus('Capturing and processing face...');
 
-        const analyzeOnce = () => new Promise(async (resolve, reject) => {
-            let settled = false;
-            const finish = (callback) => (payload) => {
-                if (settled) return;
-                settled = true;
-                callback(payload);
-            };
+        // Draw frame to canvas
+        const ctx = regPreview.getContext('2d');
+        regPreview.width  = regCam.videoWidth  || 320;
+        regPreview.height = regCam.videoHeight || 240;
+        ctx.drawImage(regCam, 0, 0);
 
-            const timeoutId = setTimeout(finish(() => reject(new Error('Face analysis timed out. Please try another photo.'))), 12000);
+        // Show preview, hide live camera
+        regCam.style.display     = 'none';
+        regPreview.style.display = 'block';
 
-            mesh.onResults(finish((results) => {
-                clearTimeout(timeoutId);
+        // Stop camera stream
+        if (regStream) regStream.getTracks().forEach(t => t.stop());
 
-                if (!results.multiFaceLandmarks || results.multiFaceLandmarks.length !== 1) {
-                    reject(new Error('Photo must contain exactly one clear face.'));
-                    return;
-                }
+        regCaptureBtn.style.display = 'none';
+        regRetakeBtn.style.display  = 'inline-block';
 
-                const signature = extractSignature(results.multiFaceLandmarks[0]);
+        // Get base64 photo data
+        const photoDataUrl = regPreview.toDataURL('image/jpeg', 0.92);
+        photoDataInput.value = photoDataUrl;
 
-                if (!Array.isArray(signature) || signature.length !== EXPECTED_SIGNATURE_LENGTH) {
-                    reject(new Error('Unable to generate valid face vector from photo.'));
-                    return;
-                }
+        // Extract face signature using MediaPipe
+        setRegStatus('Extracting face signature...');
 
-                resolve(signature);
-            }));
-
-            try {
-                await mesh.send({ image });
-            } catch (error) {
-                clearTimeout(timeoutId);
-                reject(new Error('MediaPipe processing failed for uploaded photo.'));
+        try {
+            if (!regFaceMesh) {
+                regFaceMesh = new FaceMesh({
+                    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`
+                });
+                regFaceMesh.setOptions({
+                    maxNumFaces: 1,
+                    refineLandmarks: true,
+                    minDetectionConfidence: 0.5,
+                    minTrackingConfidence: 0.5,
+                });
             }
-        });
 
-        try {
-            return await analyzeOnce();
-        } catch (_) {
-            // Retry once to handle occasional first-pass landmark instability.
-            return await analyzeOnce();
-        }
-    }
+            const signature = await new Promise((resolve, reject) => {
+                let settled = false;
+                const timeout = setTimeout(() => {
+                    if (!settled) { settled = true; reject(new Error('Face detection timed out. Please retake.')); }
+                }, 12000);
 
-    photoInput.addEventListener('change', async () => {
-        signatureInput.value = '';
-        toggleSubmit(true);
+                regFaceMesh.onResults(results => {
+                    if (settled) return;
+                    clearTimeout(timeout);
+                    settled = true;
 
-        const file = photoInput.files && photoInput.files[0];
-        if (!file) {
-            previewEl.style.display = 'none';
-            setStatus('Upload clear front-face photo to generate secure face vector.', false);
-            return;
-        }
+                    if (!results.multiFaceLandmarks?.length) {
+                        reject(new Error('No face detected in photo. Please retake.'));
+                        return;
+                    }
+                    const sig = extractSignature(results.multiFaceLandmarks[0]);
+                    if (sig.length < 140) {
+                        reject(new Error('Could not extract face data. Please retake.'));
+                        return;
+                    }
+                    resolve(sig);
+                });
 
-        const objectUrl = URL.createObjectURL(file);
-        previewEl.src = objectUrl;
-        previewEl.style.display = 'block';
+                // Send captured frame to MediaPipe
+                const img = new Image();
+                img.onload = async () => {
+                    try { await regFaceMesh.send({ image: img }); }
+                    catch (e) { if (!settled) { settled = true; clearTimeout(timeout); reject(e); } }
+                };
+                img.src = photoDataUrl;
+            });
 
-        setStatus('Analyzing photo and generating secure face vector...', false);
-        toggleSubmit(false);
-
-        try {
-            const signature = await buildVectorFromPhoto(file);
             signatureInput.value = JSON.stringify(signature);
-            setStatus('Face vector generated successfully from uploaded photo.', true);
+            setRegStatus('Face captured successfully. Fill in your details and submit.', true);
             toggleSubmit(true);
-        } catch (error) {
-            setStatus(error.message || 'Could not generate face vector. Please upload a clearer front-face photo.', false);
-            // Keep submit enabled so user can retry or attempt submit-triggered generation.
-            toggleSubmit(true);
+
+        } catch (e) {
+            setRegStatus(e.message || 'Face processing failed. Please retake.');
+            photoDataInput.value  = '';
+            signatureInput.value  = '';
+            toggleSubmit(false);
         }
+
+        regCaptureBtn.disabled = false;
     });
 
-    form.addEventListener('submit', async (event) => {
-        if (signatureInput.value) {
-            return;
-        }
-
-        event.preventDefault();
-
-        const file = photoInput.files && photoInput.files[0];
-        if (!file) {
-            setStatus('Face vector missing. Please upload a clear face photo first.', false);
-            return;
-        }
-
-        setStatus('Generating face vector from your uploaded photo...', false);
+    // Retake
+    regRetakeBtn.addEventListener('click', async () => {
+        photoDataInput.value  = '';
+        signatureInput.value  = '';
         toggleSubmit(false);
-
-        try {
-            const signature = await buildVectorFromPhoto(file);
-            signatureInput.value = JSON.stringify(signature);
-            toggleSubmit(true);
-            setStatus('Face vector generated. Submitting registration...', true);
-            form.submit();
-        } catch (error) {
-            setStatus(error.message || 'Could not generate face vector. Please upload a clearer front-face photo.', false);
-            toggleSubmit(true);
-        }
+        regPreview.style.display = 'none';
+        regRetakeBtn.style.display  = 'none';
+        regCaptureBtn.style.display = 'none';
+        regOpenBtn.style.display    = 'inline-block';
+        setRegStatus('Open camera to take your photo again.');
     });
 
-    // Keep submit usable; vector can be auto-generated on submit if missing.
-    toggleSubmit(true);
 })();
 </script>
 @endpush

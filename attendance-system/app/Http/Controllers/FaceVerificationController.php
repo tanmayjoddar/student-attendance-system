@@ -91,4 +91,43 @@ class FaceVerificationController extends Controller
             ], 503);
         }
     }
+
+    public function identify(Request $request): JsonResponse
+    {
+        $request->validate([
+            'image' => 'required|file|mimes:jpeg,jpg,png|max:2048',
+        ]);
+
+        try {
+            $response = Http::timeout(30)
+                ->attach('image', file_get_contents($request->file('image')->path()), 'frame.jpg')
+                ->post("{$this->mlServiceUrl}/identify/");
+
+            if ($response->successful()) {
+                $data = $response->json();
+                return response()->json([
+                    'ok'         => true,
+                    'matched'    => (bool) $data['matched'],
+                    'user_id'    => $data['user_id'] ?? null,
+                    'distance'   => $data['distance'],
+                    'confidence' => $data['confidence'],
+                    'message'    => $data['message'],
+                ]);
+            }
+
+            return response()->json([
+                'ok'      => false,
+                'matched' => false,
+                'message' => 'ML service error: ' . $response->body(),
+            ], 500);
+
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('ML identify failed: ' . $e->getMessage());
+            return response()->json([
+                'ok'      => false,
+                'matched' => false,
+                'message' => 'ML service unreachable: ' . $e->getMessage(),
+            ], 503);
+        }
+    }
 }
