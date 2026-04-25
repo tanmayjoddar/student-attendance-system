@@ -18,7 +18,7 @@ class FaceVerificationController extends Controller
         ]);
 
         try {
-            $response = Http::timeout(30)
+            $response = Http::timeout(120)
                 ->attach('image', file_get_contents($request->file('image')->path()), 'frame.jpg')
                 ->post("{$this->mlServiceUrl}/verify/", [
                     'user_id' => $request->student_id,

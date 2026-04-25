@@ -113,16 +113,27 @@
 
     // ─── Challenge Definitions ────────────────────────────────────────────────
     const CHALLENGES = [
-        {
-            id: 'blink',
-            instruction: 'Blink your eyes',
-            check: (lm, s) => {
-                const ear = (eyeAspectRatio(lm,159,145,33,133) + eyeAspectRatio(lm,386,374,362,263)) / 2;
-                if (ear < 0.18 && !s.challengeBlinkLow) s.challengeBlinkLow = true;
-                if (ear >= 0.21 && s.challengeBlinkLow) { s.challengeBlinkLow = false; return true; }
-                return false;
-            }
-        },
+{
+    id: 'blink',
+    instruction: 'Blink your eyes',
+    check: (lm, s) => {
+        const ear = (eyeAspectRatio(lm,159,145,33,133) + eyeAspectRatio(lm,386,374,362,263)) / 2;
+
+        // DEBUG - show live EAR on screen
+        scoresEl.textContent = `EAR: ${ear.toFixed(3)} | BlinkLow: ${s.challengeBlinkLow}`;
+
+        if (ear < 0.30 && !s.challengeBlinkLow) {
+            s.challengeBlinkLow = true;
+            scoresEl.textContent += ' | CLOSED!';
+        }
+        if (ear >= 0.30 && s.challengeBlinkLow) {
+            s.challengeBlinkLow = false;
+            scoresEl.textContent += ' | BLINK DONE!';
+            return true;
+        }
+        return false;
+    }
+},
         {
             id: 'turn_left',
             instruction: 'Turn your head LEFT',
