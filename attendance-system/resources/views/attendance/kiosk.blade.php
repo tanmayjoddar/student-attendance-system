@@ -40,13 +40,32 @@
     <div class="Box-header"><h2>Face Verification (MediaPipe)</h2></div>
     <div class="Box-body">
         <div class="d-flex" style="gap:16px; align-items:flex-start; flex-wrap: wrap;">
-            <video id="cam" autoplay playsinline style="width:320px; border:1px solid var(--color-border-default); border-radius:6px;"></video>
-            <canvas id="overlay" width="320" height="240" style="display:none;"></canvas>
+            <div id="cam-wrapper" style="position:relative; width:320px; display:inline-block;">
+                <video id="cam" autoplay playsinline style="width:320px; display:block; border:1px solid var(--color-border-default); border-radius:6px;"></video>
+                <canvas id="overlay" width="320" height="240" style="display:none;"></canvas>
+                <div id="cam-overlay-text" style="
+                    display:none;
+                    position:absolute;
+                    top:0; left:0;
+                    width:100%; height:100%;
+                    background:rgba(0,0,0,0.55);
+                    border-radius:6px;
+                    color:white;
+                    font-size:18px;
+                    font-weight:700;
+                    text-align:center;
+                    justify-content:center;
+                    align-items:center;
+                    flex-direction:column;
+                    gap:10px;
+                    z-index:20;
+                "></div>
+            </div>
             <div style="min-width: 280px;">
                 <div class="mb-4">
                     <div style="font-size: 12px; color: #656d76; margin-bottom: 4px;">Liveness Status</div>
                     <div id="verify-status" style="font-weight: 600; font-size: 14px; color: #cf222e;">Not verified</div>
-                    <div style="font-size: 12px; color: #656d76; margin-top: 4px;">Blink once and turn your head left/right</div>
+                    <div style="font-size: 12px; color: #656d76; margin-top: 4px;">Complete the random challenges shown on screen</div>
                 </div>
                 <div class="mb-4">
                     <div style="font-size: 12px; color: #656d76; margin-bottom: 4px;">Liveness Score</div>
@@ -146,7 +165,103 @@
         spoofPassed: false,
         matchSamples: [],
         mlVerifying: false,
+        // NEW CHALLENGE FIELDS:
+        challenges: [],           // 2 random challenges picked
+        currentChallengeIdx: 0,   // which challenge we're on (0 or 1)
+        challengeCompleted: [false, false],   // [false, false] → [true, true]
+        challengeBlinkLow: false, // for blink challenge
+        pitchBaseline: null,      // for nod challenge
+        browBaseline: null,       // for eyebrow challenge
+        challengeHoldFrames: 0,   // must hold pose for N frames
     };
+
+    // ============================================
+    // RANDOMIZED CHALLENGE LIVENESS SYSTEM
+    // ============================================
+    const CHALLENGES = [
+        {
+            id: 'blink',
+            instruction: '👁 Blink your eyes',
+            check: (landmarks, state) => {
+                const leftEAR = eyeAspectRatio(landmarks, 159, 145, 33, 133);
+                const rightEAR = eyeAspectRatio(landmarks, 386, 374, 362, 263);
+                const ear = (leftEAR + rightEAR) / 2;
+                if (ear < 0.18 && !state.challengeBlinkLow) state.challengeBlinkLow = true;
+                if (ear >= 0.21 && state.challengeBlinkLow) {
+                    state.challengeBlinkLow = false;
+                    return true; // completed
+                }
+                return false;
+            }
+        },
+        {
+            id: 'turn_left',
+            instruction: '⬅ Turn your head LEFT',
+            check: (landmarks, state) => {
+                const eyeMidX = (landmarks[33].x + landmarks[263].x) / 2;
+                const yaw = landmarks[1].x - eyeMidX;
+                return yaw < -0.04;
+            }
+        },
+        {
+            id: 'turn_right',
+            instruction: '➡ Turn your head RIGHT',
+            check: (landmarks, state) => {
+                const eyeMidX = (landmarks[33].x + landmarks[263].x) / 2;
+                const yaw = landmarks[1].x - eyeMidX;
+                return yaw > 0.04;
+            }
+        },
+        {
+            id: 'open_mouth',
+            instruction: '😮 Open your mouth wide',
+            check: (landmarks, state) => {
+                // Upper lip = 13, Lower lip = 14
+                const upperLip = landmarks[13];
+                const lowerLip = landmarks[14];
+                const mouthOpen = Math.abs(upperLip.y - lowerLip.y);
+                return mouthOpen > 0.04;
+            }
+        },
+        {
+            id: 'nod',
+            instruction: '⬇ Nod your head DOWN',
+            check: (landmarks, state) => {
+                // Nose tip Y vs forehead Y — if nose drops relative to forehead
+                const noseTip = landmarks[1];
+                const forehead = landmarks[10];
+                const pitch = noseTip.y - forehead.y;
+                if (!state.pitchBaseline) state.pitchBaseline = pitch;
+                return (pitch - state.pitchBaseline) > 0.03;
+            }
+        },
+        {
+            id: 'raise_eyebrows',
+            instruction: '🤨 Raise your eyebrows UP',
+            check: (landmarks, state) => {
+                // Eyebrow landmark 70 (left) and 300 (right)
+                // Eye landmark 159 (left top)
+                const leftBrow = landmarks[70];
+                const leftEyeTop = landmarks[159];
+                const browEyeDist = leftEyeTop.y - leftBrow.y;
+
+                // Set baseline on first call
+                if (!state.browBaseline) {
+                    state.browBaseline = browEyeDist;
+                    return false;
+                }
+
+                // Need significant raise — 0.025 is more strict than 0.015
+                return (browEyeDist - state.browBaseline) > 0.025;
+            }
+        },
+    ];
+
+    // PICK 2 RANDOM CHALLENGES (different each time)
+    function pickChallenges() {
+        const shuffled = [...CHALLENGES].sort(() => Math.random() - 0.5);
+        return shuffled.slice(0, 2);
+    }
 
     function distance(a, b) {
         const dx = a.x - b.x;
@@ -352,60 +467,107 @@ function extractSignature(landmarks) {
         state.liveFrames += 1;
         state.lastDetectionAt = Date.now();
 
-        const leftEAR = eyeAspectRatio(landmarks, 159, 145, 33, 133);
-        const rightEAR = eyeAspectRatio(landmarks, 386, 374, 362, 263);
-        const ear = (leftEAR + rightEAR) / 2;
-
-        if (ear < 0.18 && !state.wasBlinkLow) state.wasBlinkLow = true;
-        if (ear >= 0.2 && state.wasBlinkLow) {
-            state.wasBlinkLow = false;
-            state.blinkCount += 1;
+        // Pick challenges on first frame
+        if (state.liveFrames === 1 && state.challenges.length === 0) {
+            state.challenges = pickChallenges();
+            state.challengeCompleted = [false, false];
+            state.currentChallengeIdx = 0;
+            state.pitchBaseline = null;
+            state.browBaseline = null;
+            state.challengeHoldFrames = 0;
         }
 
-        const eyeMidX = (landmarks[33].x + landmarks[263].x) / 2;
-        const yaw = landmarks[1].x - eyeMidX;
-        state.yawMin = state.yawMin === null ? yaw : Math.min(state.yawMin, yaw);
-        state.yawMax = state.yawMax === null ? yaw : Math.max(state.yawMax, yaw);
-        const yawVariance = (state.yawMax - state.yawMin);
-
-        state.livenessScore = Math.min(100, (state.blinkCount >= 1 ? 45 : 0) + Math.min(55, yawVariance * 1800));
-
         const liveSignalOk = state.running && state.liveFrames >= 15;
-        state.spoofPassed = state.livenessScore >= MIN_LIVENESS && liveSignalOk;
 
+        // Only process challenges if not already verifying
+        if (!state.mlVerifying && !state.verified) {
+            const currentChallenge = state.challenges[state.currentChallengeIdx];
+
+            if (currentChallenge && !state.challengeCompleted[state.currentChallengeIdx]) {
+                const done = currentChallenge.check(landmarks, state);
+
+                if (done) {
+                    state.challengeHoldFrames++;
+                    if (state.challengeHoldFrames >= 5) { // 5 frames = more reliable
+                        state.challengeCompleted[state.currentChallengeIdx] = true;
+                        state.challengeHoldFrames = 0;
+
+                        if (state.currentChallengeIdx < 1) {
+                            state.currentChallengeIdx++;
+                            state.pitchBaseline = null;
+                            state.browBaseline = null;
+                            state.challengeBlinkLow = false;
+                        }
+                    }
+                } else {
+                    state.challengeHoldFrames = 0;
+                }
+            }
+        }
+
+        const allDone = state.challengeCompleted[0] && state.challengeCompleted[1];
+        state.spoofPassed = allDone && liveSignalOk;
+        state.livenessScore = (state.challengeCompleted[0] ? 50 : 0) + (state.challengeCompleted[1] ? 50 : 0);
+
+        const c1done = state.challengeCompleted[0];
+        const c2done = state.challengeCompleted[1];
+        const ch1 = state.challenges[0]?.instruction || '';
+        const ch2 = state.challenges[1]?.instruction || '';
+
+        // Trigger ML verification with countdown
         if (state.spoofPassed && select.value && !state.mlVerifying && !state.verified) {
             state.mlVerifying = true;
-            setStatus('Liveness passed! Look straight at camera — capturing in 3...', false);
 
-            let countdown = 3;
+            const overlayEl = document.getElementById('cam-overlay-text');
+
+            // Show overlay with instructions
+            overlayEl.style.display = 'flex';
+            overlayEl.innerHTML = `
+                <div style="font-size:15px; padding: 0 12px; text-align:center;">
+                    ✅ Liveness passed!<br>
+                    <span style="font-size:13px; font-weight:400;">Look straight at camera & stay still</span>
+                </div>
+                <div id="snap-countdown" style="font-size:64px; font-weight:900; line-height:1;">5</div>
+                <div style="font-size:12px; font-weight:400;">📸 Capturing in...</div>
+            `;
+            setStatus('✅ Both tasks done! Look straight — capturing soon...', true);
+
+            let countdown = 5;
+            const countdownEl = () => document.getElementById('snap-countdown');
+
             const countdownInterval = setInterval(() => {
                 countdown--;
-                if (countdown > 0) {
-                    setStatus(`Look straight at camera — capturing in ${countdown}...`, false);
-                } else {
+                if (countdownEl()) countdownEl().textContent = countdown;
+
+                if (countdown <= 0) {
                     clearInterval(countdownInterval);
 
-                    // === FREEZE EFFECT ===
+                    // Update overlay to "capturing"
+                    overlayEl.innerHTML = `
+                        <div style="font-size:18px;">📸 Capturing...</div>
+                    `;
+
+                    // Capture frame
                     const canvas = document.createElement('canvas');
                     canvas.width = camEl.videoWidth || 320;
                     canvas.height = camEl.videoHeight || 240;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(camEl, 0, 0);
+                    canvas.getContext('2d').drawImage(camEl, 0, 0);
 
-                    // Show frozen frame over video
-camEl.parentElement.style.position = 'relative';
-canvas.style.position = 'absolute';
-canvas.style.top = '0';
-canvas.style.left = '0';
-canvas.style.width = '320px';
-canvas.style.height = '240px';
-canvas.style.border = '4px solid #1a7f37';
-canvas.style.borderRadius = '6px';
-canvas.style.zIndex = '10';
-canvas.style.boxShadow = '0 0 20px rgba(26, 127, 55, 0.6)';
-camEl.parentElement.appendChild(canvas);
+                    // Show green border freeze effect
+                    canvas.style.position = 'absolute';
+                    canvas.style.top = '0';
+                    canvas.style.left = '0';
+                    canvas.style.width = '320px';
+                    canvas.style.height = '240px';
+                    canvas.style.border = '4px solid #1a7f37';
+                    canvas.style.borderRadius = '6px';
+                    canvas.style.zIndex = '10';
+                    canvas.style.boxShadow = '0 0 20px rgba(26, 127, 55, 0.6)';
+                    document.getElementById('cam-wrapper').appendChild(canvas);
 
-                    setStatus(' Captured! Verifying identity with AI...', false);
+                    // Hide overlay text (canvas is showing frozen frame now)
+                    overlayEl.style.display = 'none';
+                    setStatus('📸 Captured! Verifying identity with AI...', false);
 
                     canvas.toBlob(async (blob) => {
                         try {
@@ -420,28 +582,45 @@ camEl.parentElement.appendChild(canvas);
                             });
 
                             const result = await resp.json();
-
-                            // Remove frozen frame
                             canvas.remove();
+                            overlayEl.style.display = 'none';
 
                             if (result.verified) {
                                 state.verified = true;
                                 state.verificationAt = Date.now();
                                 state.matchScore = result.confidence;
-                                setStatus(`Identity verified! Confidence: ${result.confidence.toFixed(1)}%`, true);
+                                setStatus(`✅ Identity verified! Confidence: ${result.confidence.toFixed(1)}%`, true);
                             } else {
                                 state.verified = false;
                                 state.matchScore = 0;
                                 const dist = result.distance !== undefined ? ` (distance: ${result.distance})` : '';
-                                setStatus(` Face not matched${dist}. Look straight and retry.`, false);
-                                setTimeout(() => { state.mlVerifying = false; }, 4000);
+                                setStatus(`❌ Face not matched${dist}. Look straight and retry.`, false);
+                                setTimeout(() => {
+                                    state.mlVerifying = false;
+                                    // Reset challenges so user must redo them
+                                    state.challengeCompleted = [false, false];
+                                    state.currentChallengeIdx = 0;
+                                    state.pitchBaseline = null;
+                                    state.browBaseline = null;
+                                    state.challengeBlinkLow = false;
+                                    state.challenges = pickChallenges(); // new random challenges
+                                }, 4000);
                             }
                         } catch (e) {
                             canvas.remove();
+                            overlayEl.style.display = 'none';
                             state.verified = false;
                             state.matchScore = 0;
-                            setStatus(' Verification error. Check ML service is running.', false);
-                            setTimeout(() => { state.mlVerifying = false; }, 3000);
+                            setStatus('⚠️ Verification error. Check ML service is running.', false);
+                            setTimeout(() => {
+                                state.mlVerifying = false;
+                                state.challengeCompleted = [false, false];
+                                state.currentChallengeIdx = 0;
+                                state.pitchBaseline = null;
+                                state.browBaseline = null;
+                                state.challengeBlinkLow = false;
+                                state.challenges = pickChallenges();
+                            }, 3000);
                         }
                         syncForms();
                     }, 'image/jpeg', 0.92);
@@ -453,19 +632,23 @@ camEl.parentElement.appendChild(canvas);
             state.verificationAt = Date.now();
         }
 
+        // Scores display
         scoresEl.textContent = state.verified
-            ? `Liveness ${state.livenessScore.toFixed(1)}% | AI Match ${state.matchScore.toFixed(1)}%`
-            : `Liveness ${state.livenessScore.toFixed(1)}% | ${state.mlVerifying ? 'Verifying...' : 'Waiting for liveness'}`;
+            ? `Liveness 100% | AI Match ${state.matchScore.toFixed(1)}%`
+            : `Task 1: ${c1done ? '✅' : '⏳'} | Task 2: ${c2done ? '✅' : '⏳'}`;
         scoresEl.style.color = state.verified ? '#1a7f37' : '#1f2328';
 
+        // Status message
         if (state.verified) {
-            setStatus(`Identity verified! Confidence: ${state.matchScore.toFixed(1)}%`, true);
-        } else if (!state.spoofPassed) {
-            setStatus('Blink once and turn your head left/right to pass liveness.', false);
+            setStatus(`✅ Identity verified! Confidence: ${state.matchScore.toFixed(1)}%`, true);
         } else if (state.mlVerifying) {
-            setStatus('Liveness passed. Verifying identity with AI...', false);
-        } else {
-            setStatus('Liveness passed. Starting AI face verification...', false);
+            // Don't overwrite countdown messages
+        } else if (!liveSignalOk) {
+            setStatus('Position your face in frame...', false);
+        } else if (!c1done) {
+            setStatus(ch1, false);
+        } else if (!c2done) {
+            setStatus(ch2, false);
         }
 
         syncForms();
@@ -497,6 +680,14 @@ camEl.parentElement.appendChild(canvas);
             state.blinkCount = 0;
             state.yawMin = null;
             state.yawMax = null;
+            // NEW:
+            state.challenges = [];
+            state.currentChallengeIdx = 0;
+            state.challengeCompleted = [false, false];
+            state.challengeBlinkLow = false;
+            state.pitchBaseline = null;
+            state.browBaseline = null;
+            state.challengeHoldFrames = 0;
             syncForms();
         };
 
@@ -574,6 +765,25 @@ camEl.parentElement.appendChild(canvas);
         state.matchScore = 0;
         state.matchSamples = [];
         state.mlVerifying = false;
+        state.blinkCount = 0;
+        state.yawMin = null;
+        state.yawMax = null;
+        // NEW:
+        state.challenges = [];
+        state.currentChallengeIdx = 0;
+        state.challengeCompleted = [false, false];
+        state.challengeBlinkLow = false;
+        state.pitchBaseline = null;
+        state.browBaseline = null;
+        state.challengeHoldFrames = 0;
+
+        // Hide overlay
+        const overlayEl = document.getElementById('cam-overlay-text');
+        if (overlayEl) overlayEl.style.display = 'none';
+
+        // Remove any frozen canvas elements
+        document.querySelectorAll('#cam-wrapper canvas').forEach(c => c.remove());
+
         syncForms();
         setStatus('Camera stopped. Start camera to continue.', false);
     }
@@ -628,6 +838,14 @@ camEl.parentElement.appendChild(canvas);
         state.liveFrames = 0;
         state.verificationAt = 0;
         state.mlVerifying = false;
+        // NEW:
+        state.challenges = [];
+        state.currentChallengeIdx = 0;
+        state.challengeCompleted = [false, false];
+        state.challengeBlinkLow = false;
+        state.pitchBaseline = null;
+        state.browBaseline = null;
+        state.challengeHoldFrames = 0;
         syncForms();
     });
 
@@ -641,7 +859,7 @@ camEl.parentElement.appendChild(canvas);
         }
 
         if (!state.spoofPassed) {
-            setStatus('Spoof check not passed yet. Blink and turn your head left/right.');
+            setStatus('Complete both liveness challenges first.');
             return;
         }
 
