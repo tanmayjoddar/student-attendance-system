@@ -20,7 +20,7 @@ return [
     ],
 
     'face' => [
-        'min_match_score' => env('ATTENDANCE_FACE_MIN_MATCH', 50),
+        'min_match_score'    => env('ATTENDANCE_FACE_MIN_MATCH', 60),   // ML confidence %
         'min_liveness_score' => env('ATTENDANCE_FACE_MIN_LIVENESS', 75),
     ],
 ];

@@ -68,6 +68,19 @@ class StudentSelfRegistrationController extends Controller
             'face_registered_at' => Carbon::now(),
         ]);
 
+        // Register face in ML service
+        try {
+            $photoFullPath = storage_path('app/public/' . $photoPath);
+            \Illuminate\Support\Facades\Http::timeout(30)
+                ->attach('image1', file_get_contents($photoFullPath), 'photo.jpg')
+                ->attach('image2', file_get_contents($photoFullPath), 'photo.jpg')
+                ->post('http://127.0.0.1:8001/register/', [
+                    'user_id' => $studentId,
+                ]);
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::warning('ML face registration failed for ' . $studentId . ': ' . $e->getMessage());
+        }
+
         return redirect()->route('attendance.kiosk')
             ->with('success', 'Registration complete. Your student ID is ' . $studentId . '. You can now use attendance kiosk.');
     }

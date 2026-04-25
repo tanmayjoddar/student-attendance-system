@@ -39,6 +39,10 @@ Auth::routes(['register' => false]);
 
 Route::get('/api/server-time', [StudentDashboardController::class, 'serverTime'])->name('api.server-time');
 
+// ML Face Verification Routes
+Route::post('/api/verify-face-ml', [\App\Http\Controllers\FaceVerificationController::class, 'verify']);
+Route::post('/api/register-face-ml', [\App\Http\Controllers\FaceVerificationController::class, 'register']);
+
 Route::prefix('admin')
     ->name('admin.')
     ->middleware(['auth', 'role:super_admin'])

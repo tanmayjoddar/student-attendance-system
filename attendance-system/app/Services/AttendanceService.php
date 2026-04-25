@@ -304,20 +304,15 @@ class AttendanceService
             throw new \InvalidArgumentException('Spoof check failed. Please complete live blink and head movement challenge.');
         }
 
-        // 80 points are stored as x,y pairs => 160 numeric values.
-        if (!is_array($student->face_signature) || count($student->face_signature) < 140) {
-            throw new \InvalidArgumentException('No registered face vector found for this student. Please re-register using a clear face photo.');
-        }
-
-        $minLiveness = (float) config('attendance.face.min_liveness_score', 70);
-        $minMatch = (float) config('attendance.face.min_match_score', 82);
-
+        $minLiveness = (float) config('attendance.face.min_liveness_score', 75);
         $livenessScore = isset($verification['liveness_score']) ? (float) $verification['liveness_score'] : 0;
-        $matchScore = isset($verification['match_score']) ? (float) $verification['match_score'] : 0;
 
         if ($livenessScore < $minLiveness) {
             throw new \InvalidArgumentException('Liveness check failed. Please blink and turn your head slightly, then retry.');
         }
+
+        $minMatch = (float) config('attendance.face.min_match_score', 60);
+        $matchScore = isset($verification['match_score']) ? (float) $verification['match_score'] : 0;
 
         if ($matchScore < $minMatch) {
             throw new \InvalidArgumentException('Face match failed. Please align with camera and retry verification.');

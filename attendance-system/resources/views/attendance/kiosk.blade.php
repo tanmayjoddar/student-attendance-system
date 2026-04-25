@@ -1,5 +1,4 @@
 @extends('layouts.app')
-
 @section('content')
 <div class="d-flex flex-justify-between flex-items-center mb-4">
     <div>
@@ -146,6 +145,7 @@
         hasCheckOutToday: false,
         spoofPassed: false,
         matchSamples: [],
+        mlVerifying: false,
     };
 
     function distance(a, b) {
@@ -373,41 +373,99 @@ function extractSignature(landmarks) {
         const liveSignalOk = state.running && state.liveFrames >= 15;
         state.spoofPassed = state.livenessScore >= MIN_LIVENESS && liveSignalOk;
 
-        if (state.spoofPassed && Array.isArray(state.signature) && state.signature.length) {
-            const liveSignature = extractSignature(landmarks);
-            const instantMatch = similarityScore(liveSignature, state.signature);
+        if (state.spoofPassed && select.value && !state.mlVerifying && !state.verified) {
+            state.mlVerifying = true;
+            setStatus('Liveness passed! Look straight at camera — capturing in 3...', false);
 
-            state.matchSamples.push(instantMatch);
-            if (state.matchSamples.length > 8) {
-                state.matchSamples.shift();
-            }
+            let countdown = 3;
+            const countdownInterval = setInterval(() => {
+                countdown--;
+                if (countdown > 0) {
+                    setStatus(`Look straight at camera — capturing in ${countdown}...`, false);
+                } else {
+                    clearInterval(countdownInterval);
 
-            const sum = state.matchSamples.reduce((acc, value) => acc + value, 0);
-            state.matchScore = sum / state.matchSamples.length;
-            const minSample = Math.min(...state.matchSamples);
-            const enoughSamples = state.matchSamples.length >= MIN_MATCH_SAMPLES;
-            state.verified = enoughSamples && state.matchScore >= MIN_MATCH && minSample >= (MIN_MATCH - 2);
-        } else {
-            state.matchScore = 0;
-            state.matchSamples = [];
-            state.verified = false;
+                    // === FREEZE EFFECT ===
+                    const canvas = document.createElement('canvas');
+                    canvas.width = camEl.videoWidth || 320;
+                    canvas.height = camEl.videoHeight || 240;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(camEl, 0, 0);
+
+                    // Show frozen frame over video
+camEl.parentElement.style.position = 'relative';
+canvas.style.position = 'absolute';
+canvas.style.top = '0';
+canvas.style.left = '0';
+canvas.style.width = '320px';
+canvas.style.height = '240px';
+canvas.style.border = '4px solid #1a7f37';
+canvas.style.borderRadius = '6px';
+canvas.style.zIndex = '10';
+canvas.style.boxShadow = '0 0 20px rgba(26, 127, 55, 0.6)';
+camEl.parentElement.appendChild(canvas);
+
+                    setStatus(' Captured! Verifying identity with AI...', false);
+
+                    canvas.toBlob(async (blob) => {
+                        try {
+                            const formData = new FormData();
+                            formData.append('image', blob, 'frame.jpg');
+                            formData.append('student_id', select.value);
+
+                            const resp = await fetch('/api/verify-face-ml', {
+                                method: 'POST',
+                                headers: { 'X-CSRF-TOKEN': csrf },
+                                body: formData,
+                            });
+
+                            const result = await resp.json();
+
+                            // Remove frozen frame
+                            canvas.remove();
+
+                            if (result.verified) {
+                                state.verified = true;
+                                state.verificationAt = Date.now();
+                                state.matchScore = result.confidence;
+                                setStatus(`Identity verified! Confidence: ${result.confidence.toFixed(1)}%`, true);
+                            } else {
+                                state.verified = false;
+                                state.matchScore = 0;
+                                const dist = result.distance !== undefined ? ` (distance: ${result.distance})` : '';
+                                setStatus(` Face not matched${dist}. Look straight and retry.`, false);
+                                setTimeout(() => { state.mlVerifying = false; }, 4000);
+                            }
+                        } catch (e) {
+                            canvas.remove();
+                            state.verified = false;
+                            state.matchScore = 0;
+                            setStatus(' Verification error. Check ML service is running.', false);
+                            setTimeout(() => { state.mlVerifying = false; }, 3000);
+                        }
+                        syncForms();
+                    }, 'image/jpeg', 0.92);
+                }
+            }, 1000);
         }
 
         if (state.verified) {
             state.verificationAt = Date.now();
         }
 
-        scoresEl.textContent = `Liveness ${state.livenessScore.toFixed(1)}% | Match ${state.matchScore.toFixed(1)}% (${state.matchSamples.length}/${MIN_MATCH_SAMPLES})`;
+        scoresEl.textContent = state.verified
+            ? `Liveness ${state.livenessScore.toFixed(1)}% | AI Match ${state.matchScore.toFixed(1)}%`
+            : `Liveness ${state.livenessScore.toFixed(1)}% | ${state.mlVerifying ? 'Verifying...' : 'Waiting for liveness'}`;
         scoresEl.style.color = state.verified ? '#1a7f37' : '#1f2328';
 
         if (state.verified) {
-            setStatus('Verified: spoof check + vector match passed.', true);
+            setStatus(`Identity verified! Confidence: ${state.matchScore.toFixed(1)}%`, true);
         } else if (!state.spoofPassed) {
-            setStatus('Spoof check running: blink and turn your head left/right.', false);
-        } else if (!state.signature) {
-            setStatus('Spoof passed, but no registered face vector found for this student.', false);
+            setStatus('Blink once and turn your head left/right to pass liveness.', false);
+        } else if (state.mlVerifying) {
+            setStatus('Liveness passed. Verifying identity with AI...', false);
         } else {
-            setStatus(`Spoof passed. Matching face vector... need ${MIN_MATCH}%`, false);
+            setStatus('Liveness passed. Starting AI face verification...', false);
         }
 
         syncForms();
@@ -415,6 +473,16 @@ function extractSignature(landmarks) {
 
     async function startCamera() {
         if (state.running) return;
+
+        const runFrameLoop = async () => {
+            if (!state.running) return;
+            try {
+                await faceMesh.send({ image: camEl });
+            } catch (_) {
+                // Ignore transient frame errors and continue streaming.
+            }
+            frameLoopHandle = requestAnimationFrame(runFrameLoop);
+        };
 
         const resetVerificationState = () => {
             state.running = true;
@@ -425,17 +493,11 @@ function extractSignature(landmarks) {
             state.spoofPassed = false;
             state.matchScore = 0;
             state.matchSamples = [];
+            state.mlVerifying = false;
+            state.blinkCount = 0;
+            state.yawMin = null;
+            state.yawMax = null;
             syncForms();
-        };
-
-        const runFrameLoop = async () => {
-            if (!state.running) return;
-            try {
-                await faceMesh.send({ image: camEl });
-            } catch (_) {
-                // Ignore transient frame errors and continue streaming.
-            }
-            frameLoopHandle = requestAnimationFrame(runFrameLoop);
         };
 
         try {
@@ -511,6 +573,7 @@ function extractSignature(landmarks) {
         state.verificationAt = 0;
         state.matchScore = 0;
         state.matchSamples = [];
+        state.mlVerifying = false;
         syncForms();
         setStatus('Camera stopped. Start camera to continue.', false);
     }
@@ -564,6 +627,7 @@ function extractSignature(landmarks) {
         state.yawMax = null;
         state.liveFrames = 0;
         state.verificationAt = 0;
+        state.mlVerifying = false;
         syncForms();
     });
 
