@@ -23,6 +23,17 @@
                     <td class="d-flex" style="gap:8px;">
                         <a href="{{ route('admin.students.show', $student) }}" class="btn">View</a>
                         <a href="{{ route('admin.students.edit', $student) }}" class="btn">Edit</a>
+                        <form method="POST"
+                              action="{{ route('admin.students.destroy', $student) }}"
+                              onsubmit="return confirm('Delete {{ $student->full_name }} ({{ $student->student_id }})? This removes ALL attendance records and face data permanently.')">
+                            @csrf
+                            @method('DELETE')
+                            <button type="submit"
+                                    class="btn btn-danger"
+                                    style="padding:3px 10px; font-size:12px;">
+                                Delete
+                            </button>
+                        </form>
                     </td>
                 </tr>
             @empty

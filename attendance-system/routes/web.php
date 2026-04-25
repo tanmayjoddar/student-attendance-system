@@ -43,6 +43,7 @@ Route::get('/api/server-time', [StudentDashboardController::class, 'serverTime']
 Route::post('/api/verify-face-ml', [\App\Http\Controllers\FaceVerificationController::class, 'verify']);
 Route::post('/api/register-face-ml', [\App\Http\Controllers\FaceVerificationController::class, 'register']);
 Route::post('/api/identify-face', [\App\Http\Controllers\FaceVerificationController::class, 'identify']);
+Route::delete('/api/delete-face-ml/{studentId}', [\App\Http\Controllers\FaceVerificationController::class, 'deleteFromMl']);
 
 // Auto check-in/out after face identification (no student selection needed)
 Route::post('/attendance/auto-checkin', [StudentDashboardController::class, 'autoCheckIn'])
@@ -57,7 +58,7 @@ Route::prefix('admin')
     ->middleware(['auth', 'role:super_admin'])
     ->group(function () {
         Route::get('/dashboard', [AdminDashboardController::class, 'index'])->name('dashboard');
-        Route::resource('students', AdminStudentController::class)->except(['destroy']);
+        Route::resource('students', AdminStudentController::class);
         Route::get('/attendance', [AdminAttendanceController::class, 'index'])->name('attendance');
         Route::get('/attendance/{studentId}', [AdminAttendanceController::class, 'show'])->name('attendance.show');
         Route::post('/attendance/{logId}/override', [AdminAttendanceController::class, 'override'])->name('attendance.override');

@@ -102,17 +102,35 @@ class AdminStudentController extends Controller
             ->with('success', 'Student updated successfully');
     }
 
-    public function destroy(Student $student)
+    public function destroy(Student $student): \Illuminate\Http\RedirectResponse
     {
-        // Soft delete - just mark as inactive
-        $student->update(['is_active' => false]);
+        $studentId = $student->student_id;
 
+        // 1. Delete face embedding from FastAPI
+        try {
+            \Illuminate\Support\Facades\Http::timeout(10)
+                ->delete("http://127.0.0.1:8001/delete/{$studentId}");
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::warning('ML delete failed for ' . $studentId . ': ' . $e->getMessage());
+        }
+
+        // 2. Delete photo file from storage
+        if ($student->photo_path) {
+            \Illuminate\Support\Facades\Storage::disk('public')->delete($student->photo_path);
+        }
+
+        // 3. Delete attendance logs
+        $student->attendanceLogs()->delete();
+
+        // 4. Delete associated user account
         if ($student->user) {
             $student->user->delete();
         }
 
-        return redirect()
-            ->route('admin.students.index')
-            ->with('success', 'Student deactivated successfully');
+        // 5. Delete student record
+        $student->delete();
+
+        return redirect()->route('admin.students.index')
+            ->with('success', "Student {$studentId} and all related data deleted successfully.");
     }
 }

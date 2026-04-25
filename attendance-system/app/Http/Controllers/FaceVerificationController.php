@@ -130,4 +130,26 @@ class FaceVerificationController extends Controller
             ], 503);
         }
     }
+
+    public function deleteFromMl(Request $request): JsonResponse
+    {
+        $request->validate([
+            'student_id' => 'required|string',
+        ]);
+
+        try {
+            $response = Http::timeout(10)
+                ->delete("{$this->mlServiceUrl}/delete/{$request->student_id}");
+
+            return response()->json([
+                'ok'      => $response->successful(),
+                'message' => $response->json('message') ?? $response->body(),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'ok'      => false,
+                'message' => $e->getMessage(),
+            ], 503);
+        }
+    }
 }
