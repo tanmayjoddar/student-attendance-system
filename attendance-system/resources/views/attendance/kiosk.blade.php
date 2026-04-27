@@ -388,10 +388,9 @@
             formData.append('image', blob, 'frame.jpg');
 
             try {
-                const resp = await fetch('/api/identify-face', {
-                    method:  'POST',
-                    headers: { 'X-CSRF-TOKEN': csrf },
-                    body:    formData,
+                const resp = await fetch('http://127.0.0.1:8001/identify/', {
+                    method: 'POST',
+                    body:   formData,
                 });
 
                 const identification = await resp.json();
