@@ -26,7 +26,8 @@ class StudentSelfRegistrationController extends Controller
             'email'          => 'required|email|unique:students,email',
             'phone'          => 'nullable|string|max:20',
             'department'     => 'nullable|string|max:255',
-            'face_photo_data'=> 'required|string',   // base64 JPEG from webcam
+            'face_photo_data_1'=> 'required|string',   // base64 JPEG from webcam - Photo 1
+            'face_photo_data_2'=> 'required|string',   // base64 JPEG from webcam - Photo 2
             'face_signature' => 'required|string',
         ]);
 
@@ -36,22 +37,31 @@ class StudentSelfRegistrationController extends Controller
             ]);
         }
 
-        // Decode base64 photo and save it
-        $photoData = $validated['face_photo_data'];
+        // Decode base64 photos and save them
+        $photoData1 = $validated['face_photo_data_1'];
+        $photoData2 = $validated['face_photo_data_2'];
+        
         // Strip data:image/jpeg;base64, prefix if present
-        if (str_contains($photoData, ',')) {
-            $photoData = explode(',', $photoData)[1];
+        if (str_contains($photoData1, ',')) {
+            $photoData1 = explode(',', $photoData1)[1];
         }
-        $photoBytes = base64_decode($photoData);
-        if (!$photoBytes) {
+        if (str_contains($photoData2, ',')) {
+            $photoData2 = explode(',', $photoData2)[1];
+        }
+        
+        $photoBytes1 = base64_decode($photoData1);
+        $photoBytes2 = base64_decode($photoData2);
+        
+        if (!$photoBytes1 || !$photoBytes2) {
             return back()->withInput()->withErrors([
-                'face_photo_data' => 'Invalid photo data. Please retake your photo.',
+                'face_photo_data_1' => 'Invalid photo data. Please retake your photos.',
             ]);
         }
 
         $studentId = $this->generateStudentId();
         $filename  = 'students/' . $studentId . '.jpg';
-        \Illuminate\Support\Facades\Storage::disk('public')->put($filename, $photoBytes);
+        // Save Photo 1 as the main student photo
+        \Illuminate\Support\Facades\Storage::disk('public')->put($filename, $photoBytes1);
         $photoPath = $filename;
 
         // Parse face signature
@@ -80,15 +90,24 @@ class StudentSelfRegistrationController extends Controller
             'face_registered_at' => Carbon::now(),
         ]);
 
-        // Register face in FastAPI ML service
+        // Register face in FastAPI ML service with BOTH photos
         try {
-            $photoFullPath = storage_path('app/public/' . $photoPath);
+            // Create temporary files for both photos
+            $tempPhoto1 = sys_get_temp_dir() . '/' . $studentId . '_photo1.jpg';
+            $tempPhoto2 = sys_get_temp_dir() . '/' . $studentId . '_photo2.jpg';
+            file_put_contents($tempPhoto1, $photoBytes1);
+            file_put_contents($tempPhoto2, $photoBytes2);
+            
             \Illuminate\Support\Facades\Http::timeout(30)
-                ->attach('image1', file_get_contents($photoFullPath), 'photo.jpg')
-                ->attach('image2', file_get_contents($photoFullPath), 'photo.jpg')
+                ->attach('image1', file_get_contents($tempPhoto1), 'photo1.jpg')
+                ->attach('image2', file_get_contents($tempPhoto2), 'photo2.jpg')
                 ->post('http://127.0.0.1:8001/register/', [
                     'user_id' => $studentId,
                 ]);
+            
+            // Clean up temp files
+            @unlink($tempPhoto1);
+            @unlink($tempPhoto2);
         } catch (\Exception $e) {
             \Illuminate\Support\Facades\Log::warning('ML face registration failed for ' . $studentId . ': ' . $e->getMessage());
         }
