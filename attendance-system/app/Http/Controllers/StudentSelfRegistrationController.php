@@ -40,7 +40,7 @@ class StudentSelfRegistrationController extends Controller
         // Decode base64 photos and save them
         $photoData1 = $validated['face_photo_data_1'];
         $photoData2 = $validated['face_photo_data_2'];
-        
+
         // Strip data:image/jpeg;base64, prefix if present
         if (str_contains($photoData1, ',')) {
             $photoData1 = explode(',', $photoData1)[1];
@@ -48,10 +48,10 @@ class StudentSelfRegistrationController extends Controller
         if (str_contains($photoData2, ',')) {
             $photoData2 = explode(',', $photoData2)[1];
         }
-        
+
         $photoBytes1 = base64_decode($photoData1);
         $photoBytes2 = base64_decode($photoData2);
-        
+
         if (!$photoBytes1 || !$photoBytes2) {
             return back()->withInput()->withErrors([
                 'face_photo_data_1' => 'Invalid photo data. Please retake your photos.',
@@ -97,14 +97,14 @@ class StudentSelfRegistrationController extends Controller
             $tempPhoto2 = sys_get_temp_dir() . '/' . $studentId . '_photo2.jpg';
             file_put_contents($tempPhoto1, $photoBytes1);
             file_put_contents($tempPhoto2, $photoBytes2);
-            
-            \Illuminate\Support\Facades\Http::timeout(30)
+
+            \Illuminate\Support\Facades\Http::timeout(1)
                 ->attach('image1', file_get_contents($tempPhoto1), 'photo1.jpg')
                 ->attach('image2', file_get_contents($tempPhoto2), 'photo2.jpg')
                 ->post('http://127.0.0.1:8001/register/', [
                     'user_id' => $studentId,
                 ]);
-            
+
             // Clean up temp files
             @unlink($tempPhoto1);
             @unlink($tempPhoto2);
