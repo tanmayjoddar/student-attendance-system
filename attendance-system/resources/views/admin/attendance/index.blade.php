@@ -18,7 +18,7 @@
 <div class="Box">
     <div class="Box-body" style="padding:0;">
         <table class="Table">
-            <thead><tr><th>Student</th><th>Date</th><th>In</th><th>Out</th><th>Status</th><th>Action</th></tr></thead>
+            <thead><tr><th>Student</th><th>Date</th><th>In</th><th>In Location</th><th>Out</th><th>Out Location</th><th>Status</th><th>Action</th></tr></thead>
             <tbody>
             @forelse($students as $student)
                 @php
@@ -30,7 +30,9 @@
                     <td>{{ $student->full_name }}</td>
                     <td>{{ \Illuminate\Support\Carbon::parse($date)->format('d M Y') }}</td>
                     <td>{{ $in ? $in->recorded_time->format('H:i:s') : 'N/A' }}</td>
+                    <td class="text-small text-muted">{{ $in?->geo_address ? \Illuminate\Support\Str::limit($in->geo_address, 28) : 'N/A' }}</td>
                     <td>{{ $out ? $out->recorded_time->format('H:i:s') : 'N/A' }}</td>
+                    <td class="text-small text-muted">{{ $out?->geo_address ? \Illuminate\Support\Str::limit($out->geo_address, 28) : 'N/A' }}</td>
                     <td>
                         @if($in && $out)
                             <span class="State State--green">Complete</span>
@@ -43,7 +45,7 @@
                     <td><a href="{{ route('admin.attendance.show', $student->id) }}?date={{ $date }}" class="btn">Details</a></td>
                 </tr>
             @empty
-                <tr><td colspan="6" class="text-muted">No students found.</td></tr>
+                <tr><td colspan="8" class="text-muted">No students found.</td></tr>
             @endforelse
             </tbody>
         </table>

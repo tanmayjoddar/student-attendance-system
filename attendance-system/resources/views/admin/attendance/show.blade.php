@@ -9,7 +9,7 @@
 <div class="Box">
     <div class="Box-body" style="padding:0;">
         <table class="Table">
-            <thead><tr><th>Type</th><th>Recorded</th><th>Stated</th><th>Face</th><th>Liveness</th><th>Override</th></tr></thead>
+            <thead><tr><th>Type</th><th>Recorded</th><th>Stated</th><th>Face</th><th>Liveness</th><th>Location</th><th>Coords</th><th>Override</th></tr></thead>
             <tbody>
             @forelse($attendanceLogs as $log)
                 <tr>
@@ -18,6 +18,13 @@
                     <td>{{ $log->stated_time ? $log->stated_time->format('Y-m-d H:i:s') : 'N/A' }}</td>
                     <td>{{ $log->face_verified ? 'Verified' : 'N/A' }}</td>
                     <td>{{ $log->liveness_score ?? 'N/A' }}</td>
+                    <td class="text-small text-muted">{{ $log->geo_address ?? 'Location unavailable' }}</td>
+                    <td class="text-small text-muted">
+                        {{ $log->geo_latitude !== null && $log->geo_longitude !== null ? $log->geo_latitude . ', ' . $log->geo_longitude : 'N/A' }}
+                        @if($log->geo_accuracy !== null)
+                            <div>±{{ $log->geo_accuracy }} m</div>
+                        @endif
+                    </td>
                     <td>
                         <form method="POST" action="{{ route('admin.attendance.override', $log->id) }}" class="d-flex" style="gap:8px; align-items:center;">
                             @csrf
@@ -28,7 +35,7 @@
                     </td>
                 </tr>
             @empty
-                <tr><td colspan="6" class="text-muted">No logs on this day.</td></tr>
+                <tr><td colspan="8" class="text-muted">No logs on this day.</td></tr>
             @endforelse
             </tbody>
         </table>

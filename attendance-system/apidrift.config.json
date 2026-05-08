@@ -1,0 +1,18 @@
+{
+  "environments": {
+    "staging": {
+      "baseUrl": "",
+      "headers": {
+        "Authorization": "Bearer ${STAGING_TOKEN}"
+      }
+    },
+    "prod": {
+      "baseUrl": "",
+      "headers": {
+        "Authorization": "Bearer ${PROD_TOKEN}"
+      }
+    }
+  },
+  "discovery": {},
+  "endpoints": []
+}

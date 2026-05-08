@@ -7,6 +7,8 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+use Illuminate\Support\Facades\Response;
 
 class AdminStudentController extends Controller
 {
@@ -17,6 +19,65 @@ class AdminStudentController extends Controller
             ->paginate(20);
 
         return view('admin.students.index', compact('students'));
+    }
+
+    public function exportCsv()
+    {
+        $filename = 'students_export_' . date('Ymd_His') . '.csv';
+        $students = Student::orderBy('student_id')->get();
+
+        $response = new StreamedResponse(function () use ($students) {
+            $handle = fopen('php://output', 'w');
+            // Header row
+            fputcsv($handle, ['Student ID', 'First Name', 'Last Name', 'Email', 'Phone', 'Department', 'Semester', 'Active', 'Registered At']);
+
+            foreach ($students as $s) {
+                fputcsv($handle, [
+                    $s->student_id,
+                    $s->first_name,
+                    $s->last_name,
+                    $s->email,
+                    $s->phone,
+                    $s->department,
+                    $s->semester,
+                    $s->is_active ? 'Yes' : 'No',
+                    optional($s->created_at)->toDateTimeString(),
+                ]);
+            }
+
+            fclose($handle);
+        });
+
+        $disposition = $response->headers;
+        $response->headers->set('Content-Type', 'text/csv; charset=UTF-8');
+        $response->headers->set('Content-Disposition', "attachment; filename=\"{$filename}\"");
+
+        return $response;
+    }
+
+    public function exportPdf()
+    {
+        $students = Student::orderBy('student_id')->get();
+
+        // If Dompdf is available, use it
+        if (class_exists('\Dompdf\Dompdf')) {
+            $html = view('admin.students._export_table', compact('students'))->render();
+            $dompdf = new \Dompdf\Dompdf();
+            $dompdf->loadHtml($html);
+            $dompdf->setPaper('A4', 'portrait');
+            $dompdf->render();
+            return Response::make($dompdf->output(), 200, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'attachment; filename="students_export_' . date('Ymd_His') . '.pdf"'
+            ]);
+        }
+
+        // Fallback: return an HTML download (user can Save as PDF from browser)
+        $html = view('admin.students._export_table', compact('students'))->render();
+        return Response::make($html, 200, [
+            'Content-Type' => 'text/html; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="students_export_' . date('Ymd_His') . '.html"'
+        ]);
     }
 
     public function create()

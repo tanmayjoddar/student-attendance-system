@@ -16,7 +16,7 @@
     <div class="Box-header"><h2>Recent Attendance</h2></div>
     <div class="Box-body" style="padding:0;">
         <table class="Table">
-            <thead><tr><th>Student</th><th>Type</th><th>Time</th><th>IP</th><th>Flags</th></tr></thead>
+            <thead><tr><th>Student</th><th>Type</th><th>Time</th><th>IP</th><th>Location</th><th>Flags</th></tr></thead>
             <tbody>
             @forelse($recentAttendance as $log)
                 <tr>
@@ -24,13 +24,16 @@
                     <td><span class="State {{ $log->type === 'in' ? 'State--green' : 'State--yellow' }}">{{ strtoupper($log->type) }}</span></td>
                     <td>{{ $log->recorded_time->format('H:i:s') }}</td>
                     <td class="text-small text-muted">{{ $log->ip_address }}</td>
+                    <td class="text-small text-muted">
+                        {{ $log->geo_address ? \Illuminate\Support\Str::limit($log->geo_address, 42) : 'Location unavailable' }}
+                    </td>
                     <td>
                         @if($log->is_flagged)<span class="State State--red">Flagged</span>@endif
                         @if($log->face_verified)<span class="State State--green">Face OK</span>@endif
                     </td>
                 </tr>
             @empty
-                <tr><td colspan="5" class="text-muted">No records today.</td></tr>
+                <tr><td colspan="6" class="text-muted">No records today.</td></tr>
             @endforelse
             </tbody>
         </table>

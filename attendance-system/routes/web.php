@@ -59,6 +59,8 @@ Route::prefix('admin')
     ->group(function () {
         Route::get('/dashboard', [AdminDashboardController::class, 'index'])->name('dashboard');
         Route::resource('students', AdminStudentController::class);
+        Route::get('students-export/csv', [AdminStudentController::class, 'exportCsv'])->name('students.export.csv');
+        Route::get('students-export/pdf', [AdminStudentController::class, 'exportPdf'])->name('students.export.pdf');
         Route::get('/attendance', [AdminAttendanceController::class, 'index'])->name('attendance');
         Route::get('/attendance/{studentId}', [AdminAttendanceController::class, 'show'])->name('attendance.show');
         Route::post('/attendance/{logId}/override', [AdminAttendanceController::class, 'override'])->name('attendance.override');

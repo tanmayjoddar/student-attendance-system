@@ -94,12 +94,22 @@ class StudentDashboardController extends Controller
                 'match_score' => 'nullable|numeric|min:0|max:100',
                 'blink_count' => 'nullable|integer|min:0',
                 'yaw_variance' => 'nullable|numeric|min:0',
+                'geo_address' => 'nullable|string|max:1000',
+                'geo_latitude' => 'nullable|numeric|min:-90|max:90',
+                'geo_longitude' => 'nullable|numeric|min:-180|max:180',
+                'geo_accuracy' => 'nullable|numeric|min:0|max:100000',
             ]);
 
             $log = $this->attendanceService->checkIn(
                 $student,
                 $request->input('stated_time'),
-                $verification
+                $verification,
+                [
+                    'geo_address' => $request->input('geo_address'),
+                    'geo_latitude' => $request->input('geo_latitude'),
+                    'geo_longitude' => $request->input('geo_longitude'),
+                    'geo_accuracy' => $request->input('geo_accuracy'),
+                ]
             );
 
             return redirect()
@@ -127,9 +137,18 @@ class StudentDashboardController extends Controller
                 'match_score' => 'nullable|numeric|min:0|max:100',
                 'blink_count' => 'nullable|integer|min:0',
                 'yaw_variance' => 'nullable|numeric|min:0',
+                'geo_address' => 'nullable|string|max:1000',
+                'geo_latitude' => 'nullable|numeric|min:-90|max:90',
+                'geo_longitude' => 'nullable|numeric|min:-180|max:180',
+                'geo_accuracy' => 'nullable|numeric|min:0|max:100000',
             ]);
 
-            $log = $this->attendanceService->checkOut($student, $verification);
+            $log = $this->attendanceService->checkOut($student, $verification, [
+                'geo_address' => $request->input('geo_address'),
+                'geo_latitude' => $request->input('geo_latitude'),
+                'geo_longitude' => $request->input('geo_longitude'),
+                'geo_accuracy' => $request->input('geo_accuracy'),
+            ]);
 
             return redirect()
                 ->route('student.dashboard')
@@ -151,6 +170,10 @@ class StudentDashboardController extends Controller
             'match_score' => 'nullable|numeric|min:0|max:100',
             'blink_count' => 'nullable|integer|min:0',
             'yaw_variance' => 'nullable|numeric|min:0',
+            'geo_address' => 'nullable|string|max:1000',
+            'geo_latitude' => 'nullable|numeric|min:-90|max:90',
+            'geo_longitude' => 'nullable|numeric|min:-180|max:180',
+            'geo_accuracy' => 'nullable|numeric|min:0|max:100000',
         ]);
 
         $student = Student::where('student_id', $validated['student_id'])->firstOrFail();
@@ -166,6 +189,13 @@ class StudentDashboardController extends Controller
                     'match_score' => $validated['match_score'] ?? null,
                     'blink_count' => $validated['blink_count'] ?? null,
                     'yaw_variance' => $validated['yaw_variance'] ?? null,
+                ]
+                ,
+                [
+                    'geo_address' => $validated['geo_address'] ?? null,
+                    'geo_latitude' => $validated['geo_latitude'] ?? null,
+                    'geo_longitude' => $validated['geo_longitude'] ?? null,
+                    'geo_accuracy' => $validated['geo_accuracy'] ?? null,
                 ]
             );
 
@@ -185,6 +215,10 @@ class StudentDashboardController extends Controller
             'match_score' => 'nullable|numeric|min:0|max:100',
             'blink_count' => 'nullable|integer|min:0',
             'yaw_variance' => 'nullable|numeric|min:0',
+            'geo_address' => 'nullable|string|max:1000',
+            'geo_latitude' => 'nullable|numeric|min:-90|max:90',
+            'geo_longitude' => 'nullable|numeric|min:-180|max:180',
+            'geo_accuracy' => 'nullable|numeric|min:0|max:100000',
         ]);
 
         $student = Student::where('student_id', $validated['student_id'])->firstOrFail();
@@ -199,6 +233,12 @@ class StudentDashboardController extends Controller
                     'match_score' => $validated['match_score'] ?? null,
                     'blink_count' => $validated['blink_count'] ?? null,
                     'yaw_variance' => $validated['yaw_variance'] ?? null,
+                ],
+                [
+                    'geo_address' => $validated['geo_address'] ?? null,
+                    'geo_latitude' => $validated['geo_latitude'] ?? null,
+                    'geo_longitude' => $validated['geo_longitude'] ?? null,
+                    'geo_accuracy' => $validated['geo_accuracy'] ?? null,
                 ]
             );
 
@@ -212,7 +252,7 @@ class StudentDashboardController extends Controller
     {
         $validated = $request->validate([
             // 80 points are stored as x,y pairs => 160 numeric values.
-            'signature' => 'required|array|min:140',
+            'signature' => 'required|array|min:160',
             'signature.*' => 'numeric',
             'student_id' => 'nullable|string|exists:students,student_id',
         ]);
@@ -257,6 +297,10 @@ class StudentDashboardController extends Controller
             'student_id'    => 'required|string|exists:students,student_id',
             'liveness_score'=> 'required|numeric|min:0|max:100',
             'match_score'   => 'required|numeric|min:0|max:100',
+            'geo_address'   => 'nullable|string|max:1000',
+            'geo_latitude'  => 'nullable|numeric|min:-90|max:90',
+            'geo_longitude' => 'nullable|numeric|min:-180|max:180',
+            'geo_accuracy'  => 'nullable|numeric|min:0|max:100000',
         ]);
 
         $student = Student::where('student_id', $validated['student_id'])->firstOrFail();
@@ -265,7 +309,13 @@ class StudentDashboardController extends Controller
             $log = $this->attendanceService->autoCheckIn(
                 $student,
                 (float) $validated['liveness_score'],
-                (float) $validated['match_score']
+                (float) $validated['match_score'],
+                [
+                    'geo_address' => $validated['geo_address'] ?? null,
+                    'geo_latitude' => $validated['geo_latitude'] ?? null,
+                    'geo_longitude' => $validated['geo_longitude'] ?? null,
+                    'geo_accuracy' => $validated['geo_accuracy'] ?? null,
+                ]
             );
 
             return response()->json([
@@ -296,6 +346,10 @@ class StudentDashboardController extends Controller
             'student_id'    => 'required|string|exists:students,student_id',
             'liveness_score'=> 'required|numeric|min:0|max:100',
             'match_score'   => 'required|numeric|min:0|max:100',
+            'geo_address'   => 'nullable|string|max:1000',
+            'geo_latitude'  => 'nullable|numeric|min:-90|max:90',
+            'geo_longitude' => 'nullable|numeric|min:-180|max:180',
+            'geo_accuracy'  => 'nullable|numeric|min:0|max:100000',
         ]);
 
         $student = Student::where('student_id', $validated['student_id'])->firstOrFail();
@@ -304,7 +358,13 @@ class StudentDashboardController extends Controller
             $log = $this->attendanceService->autoCheckOut(
                 $student,
                 (float) $validated['liveness_score'],
-                (float) $validated['match_score']
+                (float) $validated['match_score'],
+                [
+                    'geo_address' => $validated['geo_address'] ?? null,
+                    'geo_latitude' => $validated['geo_latitude'] ?? null,
+                    'geo_longitude' => $validated['geo_longitude'] ?? null,
+                    'geo_accuracy' => $validated['geo_accuracy'] ?? null,
+                ]
             );
 
             return response()->json([

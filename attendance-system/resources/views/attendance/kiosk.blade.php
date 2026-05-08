@@ -67,6 +67,10 @@
                         style="padding:10px 24px; font-size:16px; width:100%;">
                         Start Camera
                     </button>
+                    <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+                        <div id="geo-hint" style="font-size:12px; color:#656d76;">Location status: unknown</div>
+                        <button type="button" id="geo-retry" class="btn" style="padding:4px 8px; font-size:12px;">Retry Location</button>
+                    </div>
                 </div>
 
                 <div id="result-box" style="display:none;" class="Box">
@@ -86,7 +90,10 @@
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
 <script>
 (() => {
-    const csrf    = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+    function getCsrf() {
+        const m = document.querySelector('meta[name="csrf-token"]');
+        return m ? m.getAttribute('content') : '';
+    }
     const camEl   = document.getElementById('cam');
     const statusEl  = document.getElementById('verify-status');
     const scoresEl  = document.getElementById('verify-scores');
@@ -220,6 +227,89 @@
     function showResult(html) {
         resultBox.style.display = 'block';
         resultContent.innerHTML = html;
+    }
+
+    async function collectGeoData() {
+        if (!navigator.geolocation) {
+            return {
+                geo_address: null,
+                geo_latitude: null,
+                geo_longitude: null,
+                geo_accuracy: null,
+            };
+        }
+
+        const position = await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+                enableHighAccuracy: true,
+                timeout: 8000,
+                maximumAge: 0,
+            });
+        }).catch((err) => {
+            // show hint to user
+            const hint = document.getElementById('geo-hint');
+            if (hint) hint.textContent = 'Location unavailable — allow location permission and click Retry.';
+            return null;
+        });
+
+        if (!position) {
+            return {
+                geo_address: null,
+                geo_latitude: null,
+                geo_longitude: null,
+                geo_accuracy: null,
+            };
+        }
+
+        const latitude = Number(position.coords.latitude.toFixed(7));
+        const longitude = Number(position.coords.longitude.toFixed(7));
+        const accuracy = Number(position.coords.accuracy.toFixed(2));
+
+        let geoAddress = `Lat ${latitude}, Lng ${longitude}`;
+
+        try {
+            const reverseResp = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`);
+            if (reverseResp.ok) {
+                const reverseData = await reverseResp.json();
+                if (reverseData && reverseData.display_name) {
+                    geoAddress = reverseData.display_name;
+                }
+            }
+        } catch (_) {
+            // Keep coordinate fallback.
+        }
+
+        return {
+            geo_address: geoAddress,
+            geo_latitude: latitude,
+            geo_longitude: longitude,
+            geo_accuracy: accuracy,
+        };
+    }
+
+    // Exposed helper to retry location and update UI
+    window.retryGeo = async function() {
+        const g = await collectGeoData();
+        const hint = document.getElementById('geo-hint');
+        if (!g || !g.geo_latitude) {
+            if (hint) hint.textContent = 'Location unavailable — allow location permission and click Retry.';
+            return g;
+        }
+        if (hint) hint.textContent = `Location: ${g.geo_address}`;
+        return g;
+    };
+
+    // Wire Retry Location button
+    const geoRetryBtn = document.getElementById('geo-retry');
+    if (geoRetryBtn) {
+        geoRetryBtn.addEventListener('click', async () => {
+            geoRetryBtn.disabled = true;
+            const old = geoRetryBtn.textContent;
+            geoRetryBtn.textContent = 'Retrying...';
+            try { await window.retryGeo(); } catch (_) {}
+            geoRetryBtn.disabled = false;
+            geoRetryBtn.textContent = old || 'Retry Location';
+        });
     }
 
     function hideResult() {
@@ -414,23 +504,32 @@
     async function handleMatched(identification) {
         const studentId  = identification.user_id;
         const confidence = identification.confidence;
+        const geo = await collectGeoData();
 
         setStatus(`Identified: ${studentId} (${confidence.toFixed(1)}% confidence)`, '#1a7f37');
 
         // First try check-in, then check-out
-        const checkInResp = await fetch('/attendance/auto-checkin', {
+                const checkInResp = await fetch('/attendance/auto-checkin', {
             method:  'POST',
+            credentials: 'same-origin',
             headers: {
-                'X-CSRF-TOKEN':  csrf,
+                'X-CSRF-TOKEN':  getCsrf(),
                 'Content-Type':  'application/json',
                 'Accept':        'application/json',
             },
             body: JSON.stringify({
                 student_id:    studentId,
                 liveness_score: state.livenessScore,
-                match_score:   confidence,
+                        match_score:   confidence,
+                        ...geo,
             }),
         });
+
+        if (checkInResp.status === 419) {
+            setStatus('Session expired — reloading...', '#cf222e');
+            setTimeout(() => location.reload(), 1000);
+            return;
+        }
 
         const checkInResult = await checkInResp.json();
 
@@ -446,8 +545,9 @@
             // Already checked in — try check-out
             const checkOutResp = await fetch('/attendance/auto-checkout', {
                 method:  'POST',
+                credentials: 'same-origin',
                 headers: {
-                    'X-CSRF-TOKEN':  csrf,
+                    'X-CSRF-TOKEN':  getCsrf(),
                     'Content-Type':  'application/json',
                     'Accept':        'application/json',
                 },
@@ -455,8 +555,15 @@
                     student_id:    studentId,
                     liveness_score: state.livenessScore,
                     match_score:   confidence,
+                    ...geo,
                 }),
             });
+
+            if (checkOutResp.status === 419) {
+                setStatus('Session expired — reloading...', '#cf222e');
+                setTimeout(() => location.reload(), 1000);
+                return;
+            }
 
             const checkOutResult = await checkOutResp.json();
 

@@ -13,9 +13,22 @@ use Illuminate\Support\Facades\DB;
 class AttendanceService
 {
     /**
+     * Normalize optional geo payload into a database-friendly structure.
+     */
+    protected function normalizeGeoData(?array $geo = null): array
+    {
+        return [
+            'geo_address' => $geo['geo_address'] ?? null,
+            'geo_latitude' => isset($geo['geo_latitude']) ? (float) $geo['geo_latitude'] : null,
+            'geo_longitude' => isset($geo['geo_longitude']) ? (float) $geo['geo_longitude'] : null,
+            'geo_accuracy' => isset($geo['geo_accuracy']) ? (float) $geo['geo_accuracy'] : null,
+        ];
+    }
+
+    /**
      * Process check-in for a student
      */
-    public function checkIn(Student $student, ?string $statedTime = null, ?array $verification = null): AttendanceLog
+    public function checkIn(Student $student, ?string $statedTime = null, ?array $verification = null, ?array $geo = null): AttendanceLog
     {
         $today = Carbon::today();
         $now = Carbon::now();
@@ -44,7 +57,9 @@ class AttendanceService
         $parsedStated = $this->validateStatedTime($statedTime, $now);
 
         // Create attendance log
-        return DB::transaction(function () use ($student, $today, $now, $parsedStated, $verification) {
+        $geoData = $this->normalizeGeoData($geo);
+
+        return DB::transaction(function () use ($student, $today, $now, $parsedStated, $verification, $geoData) {
             $log = AttendanceLog::create([
                 'student_id'    => $student->id,
                 'date'          => $today,
@@ -52,6 +67,10 @@ class AttendanceService
                 'recorded_time' => $now,
                 'stated_time'   => $parsedStated,
                 'ip_address'    => request()->ip(),
+            'geo_address'   => $geoData['geo_address'],
+            'geo_latitude'  => $geoData['geo_latitude'],
+            'geo_longitude' => $geoData['geo_longitude'],
+            'geo_accuracy'  => $geoData['geo_accuracy'],
                 'is_flagged'    => false,
                 'face_verified' => true,
                 'liveness_score' => isset($verification['liveness_score']) ? (float) $verification['liveness_score'] : null,
@@ -74,7 +93,7 @@ class AttendanceService
     /**
      * Process check-out for a student
      */
-    public function checkOut(Student $student, ?array $verification = null): AttendanceLog
+    public function checkOut(Student $student, ?array $verification = null, ?array $geo = null): AttendanceLog
     {
         $today = Carbon::today();
         $now = Carbon::now();
@@ -101,7 +120,9 @@ class AttendanceService
             throw new DuplicateAttendanceException('Already checked out today');
         }
 
-        return DB::transaction(function () use ($student, $today, $now, $verification) {
+        $geoData = $this->normalizeGeoData($geo);
+
+        return DB::transaction(function () use ($student, $today, $now, $verification, $geoData) {
             $log = AttendanceLog::create([
                 'student_id'    => $student->id,
                 'date'          => $today,
@@ -109,6 +130,10 @@ class AttendanceService
                 'recorded_time' => $now,
                 'stated_time'   => null,
                 'ip_address'    => request()->ip(),
+            'geo_address'   => $geoData['geo_address'],
+            'geo_latitude'  => $geoData['geo_latitude'],
+            'geo_longitude' => $geoData['geo_longitude'],
+            'geo_accuracy'  => $geoData['geo_accuracy'],
                 'is_flagged'    => false,
                 'face_verified' => true,
                 'liveness_score' => isset($verification['liveness_score']) ? (float) $verification['liveness_score'] : null,
@@ -132,7 +157,7 @@ class AttendanceService
      * Auto check-in after successful face identification.
      * No face_verified param needed — identification IS the verification.
      */
-    public function autoCheckIn(Student $student, float $livenessScore, float $matchScore): AttendanceLog
+    public function autoCheckIn(Student $student, float $livenessScore, float $matchScore, ?array $geo = null): AttendanceLog
     {
         $today = Carbon::today();
         $now   = Carbon::now();
@@ -159,7 +184,9 @@ class AttendanceService
             throw new DuplicateAttendanceException('Already checked in today at ' . $existing->recorded_time->format('h:i A'));
         }
 
-        return DB::transaction(function () use ($student, $today, $now, $livenessScore, $matchScore) {
+        $geoData = $this->normalizeGeoData($geo);
+
+        return DB::transaction(function () use ($student, $today, $now, $livenessScore, $matchScore, $geoData) {
             $log = AttendanceLog::create([
                 'student_id'        => $student->id,
                 'date'              => $today,
@@ -167,6 +194,10 @@ class AttendanceService
                 'recorded_time'     => $now,
                 'stated_time'       => null,
                 'ip_address'        => request()->ip(),
+            'geo_address'       => $geoData['geo_address'],
+            'geo_latitude'      => $geoData['geo_latitude'],
+            'geo_longitude'     => $geoData['geo_longitude'],
+            'geo_accuracy'      => $geoData['geo_accuracy'],
                 'is_flagged'        => false,
                 'face_verified'     => true,
                 'liveness_score'    => $livenessScore,
@@ -187,7 +218,7 @@ class AttendanceService
     /**
      * Auto check-out after successful face identification.
      */
-    public function autoCheckOut(Student $student, float $livenessScore, float $matchScore): AttendanceLog
+    public function autoCheckOut(Student $student, float $livenessScore, float $matchScore, ?array $geo = null): AttendanceLog
     {
         $today = Carbon::today();
         $now   = Carbon::now();
@@ -210,7 +241,9 @@ class AttendanceService
             throw new DuplicateAttendanceException('Already checked out today at ' . $existingOut->recorded_time->format('h:i A'));
         }
 
-        return DB::transaction(function () use ($student, $today, $now, $livenessScore, $matchScore) {
+        $geoData = $this->normalizeGeoData($geo);
+
+        return DB::transaction(function () use ($student, $today, $now, $livenessScore, $matchScore, $geoData) {
             $log = AttendanceLog::create([
                 'student_id'        => $student->id,
                 'date'              => $today,
@@ -218,6 +251,10 @@ class AttendanceService
                 'recorded_time'     => $now,
                 'stated_time'       => null,
                 'ip_address'        => request()->ip(),
+            'geo_address'       => $geoData['geo_address'],
+            'geo_latitude'      => $geoData['geo_latitude'],
+            'geo_longitude'     => $geoData['geo_longitude'],
+            'geo_accuracy'      => $geoData['geo_accuracy'],
                 'is_flagged'        => false,
                 'face_verified'     => true,
                 'liveness_score'    => $livenessScore,
