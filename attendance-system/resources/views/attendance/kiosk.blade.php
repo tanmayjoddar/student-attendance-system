@@ -101,6 +101,8 @@
     const resultContent = document.getElementById('result-content');
     const overlayEl = document.getElementById('cam-overlay');
 
+    let cachedGeo = null;
+
     // ─── State ───────────────────────────────────────────────────────────────
     const state = {
         running:            false,
@@ -230,66 +232,94 @@
     }
 
     async function collectGeoData() {
-        if (!navigator.geolocation) {
-            return {
-                geo_address: null,
-                geo_latitude: null,
-                geo_longitude: null,
-                geo_accuracy: null,
-            };
-        }
+        // 1. Try browser geolocation (precise, requires HTTPS)
+        if (navigator.geolocation) {
+            try {
+                const position = await new Promise((resolve, reject) => {
+                    navigator.geolocation.getCurrentPosition(resolve, reject, {
+                        enableHighAccuracy: true,
+                        timeout: 8000,
+                        maximumAge: 0,
+                    });
+                });
 
-        const position = await new Promise((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject, {
-                enableHighAccuracy: true,
-                timeout: 8000,
-                maximumAge: 0,
-            });
-        }).catch((err) => {
-            // show hint to user
-            const hint = document.getElementById('geo-hint');
-            if (hint) hint.textContent = 'Location unavailable — allow location permission and click Retry.';
-            return null;
-        });
+                const latitude = Number(position.coords.latitude.toFixed(7));
+                const longitude = Number(position.coords.longitude.toFixed(7));
+                const accuracy = Number(position.coords.accuracy.toFixed(2));
 
-        if (!position) {
-            return {
-                geo_address: null,
-                geo_latitude: null,
-                geo_longitude: null,
-                geo_accuracy: null,
-            };
-        }
+                let geoAddress = `Lat ${latitude}, Lng ${longitude}`;
 
-        const latitude = Number(position.coords.latitude.toFixed(7));
-        const longitude = Number(position.coords.longitude.toFixed(7));
-        const accuracy = Number(position.coords.accuracy.toFixed(2));
-
-        let geoAddress = `Lat ${latitude}, Lng ${longitude}`;
-
-        try {
-            const reverseResp = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`);
-            if (reverseResp.ok) {
-                const reverseData = await reverseResp.json();
-                if (reverseData && reverseData.display_name) {
-                    geoAddress = reverseData.display_name;
+                try {
+                    const reverseResp = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`);
+                    if (reverseResp.ok) {
+                        const reverseData = await reverseResp.json();
+                        if (reverseData && reverseData.display_name) {
+                            geoAddress = reverseData.display_name;
+                        }
+                    }
+                } catch (_) {
+                    // Keep coordinate fallback.
                 }
+
+                return {
+                    geo_address: geoAddress,
+                    geo_latitude: latitude,
+                    geo_longitude: longitude,
+                    geo_accuracy: accuracy,
+                };
+            } catch (_) {
+                // Browser geo failed — fall through to IP fallback
             }
-        } catch (_) {
-            // Keep coordinate fallback.
+        }
+
+        // 2. IP geolocation fallback (works on HTTP, approximate)
+        // Try multiple providers for better accuracy
+        const ipProviders = [
+            async () => {
+                const r = await fetch('http://ip-api.com/json/?fields=lat,lon,city,regionName,country,query');
+                if (!r.ok) return null;
+                const d = await r.json();
+                return d && d.lat && d.lon ? d : null;
+            },
+            async () => {
+                const r = await fetch('https://ipapi.co/json/');
+                if (!r.ok) return null;
+                const d = await r.json();
+                return d && d.latitude && d.longitude ? d : null;
+            },
+        ];
+
+        for (const provider of ipProviders) {
+            try {
+                const data = await provider();
+                if (data) {
+                    const parts = [data.city, data.regionName || data.region, data.country || data.country_name].filter(Boolean);
+                    const lat = data.lat ?? data.latitude;
+                    const lon = data.lon ?? data.longitude;
+                    return {
+                        geo_address: parts.join(', ') || `Lat ${lat}, Lng ${lon}`,
+                        geo_latitude: Number(Number(lat).toFixed(7)),
+                        geo_longitude: Number(Number(lon).toFixed(7)),
+                        geo_accuracy: null,
+                    };
+                }
+            } catch (_) {
+                // try next provider
+            }
         }
 
         return {
-            geo_address: geoAddress,
-            geo_latitude: latitude,
-            geo_longitude: longitude,
-            geo_accuracy: accuracy,
+            geo_address: null,
+            geo_latitude: null,
+            geo_longitude: null,
+            geo_accuracy: null,
         };
     }
 
     // Exposed helper to retry location and update UI
     window.retryGeo = async function() {
         const g = await collectGeoData();
+        if (g && g.geo_latitude) cachedGeo = g;
         const hint = document.getElementById('geo-hint');
         if (!g || !g.geo_latitude) {
             if (hint) hint.textContent = 'Location unavailable — allow location permission and click Retry.';
@@ -504,7 +534,7 @@
     async function handleMatched(identification) {
         const studentId  = identification.user_id;
         const confidence = identification.confidence;
-        const geo = await collectGeoData();
+        const geo = (cachedGeo && cachedGeo.geo_latitude) ? cachedGeo : await collectGeoData();
 
         setStatus(`Identified: ${studentId} (${confidence.toFixed(1)}% confidence)`, '#1a7f37');
 
@@ -691,6 +721,7 @@
             resetChallengeState();
             setStatus('Look at the camera and follow the instructions.');
             document.getElementById('start-camera').style.display = 'none';
+            collectGeoData().then(g => { cachedGeo = g; }).catch(() => {});
             return;
         } catch (_) {
             camera = null;
@@ -709,6 +740,7 @@
             frameLoopHandle = requestAnimationFrame(runFrameLoop);
             setStatus('Look at the camera and follow the instructions.');
             document.getElementById('start-camera').style.display = 'none';
+            collectGeoData().then(g => { cachedGeo = g; }).catch(() => {});
         } catch (err) {
             state.running = false;
             setStatus('Camera failed. Allow camera permission and try again.', '#cf222e');

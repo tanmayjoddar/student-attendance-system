@@ -14,15 +14,78 @@ class AttendanceService
 {
     /**
      * Normalize optional geo payload into a database-friendly structure.
+     * Falls back to IP geolocation when client-side geo is unavailable.
      */
     protected function normalizeGeoData(?array $geo = null): array
     {
+        if ($geo && isset($geo['geo_latitude']) && $geo['geo_latitude'] !== null) {
+            return [
+                'geo_address'   => $geo['geo_address'] ?? null,
+                'geo_latitude'  => (float) $geo['geo_latitude'],
+                'geo_longitude' => (float) $geo['geo_longitude'],
+                'geo_accuracy'  => isset($geo['geo_accuracy']) ? (float) $geo['geo_accuracy'] : null,
+            ];
+        }
+
+        $ipFallback = $this->ipGeolocation();
+        if ($ipFallback) {
+            return $ipFallback;
+        }
+
         return [
-            'geo_address' => $geo['geo_address'] ?? null,
-            'geo_latitude' => isset($geo['geo_latitude']) ? (float) $geo['geo_latitude'] : null,
-            'geo_longitude' => isset($geo['geo_longitude']) ? (float) $geo['geo_longitude'] : null,
-            'geo_accuracy' => isset($geo['geo_accuracy']) ? (float) $geo['geo_accuracy'] : null,
+            'geo_address'   => null,
+            'geo_latitude'  => null,
+            'geo_longitude' => null,
+            'geo_accuracy'  => null,
         ];
+    }
+
+    /**
+     * Attempt IP-based geolocation as a fallback when browser geo is unavailable.
+     * Tries multiple providers for better accuracy. For localhost, queries the
+     * server's public IP since the client IP has no meaningful location.
+     */
+    protected function ipGeolocation(): ?array
+    {
+        $ip = request()->ip();
+        $isLocal = !$ip || in_array($ip, ['127.0.0.1', '::1', 'localhost'], true);
+
+        $providers = [];
+
+        if ($isLocal) {
+            // For localhost, call without IP to get server's public IP location
+            $providers[] = ['url' => 'http://ip-api.com/json/?fields=lat,lon,city,regionName,country,query', 'lat' => 'lat', 'lon' => 'lon', 'city' => 'city', 'region' => 'regionName', 'country' => 'country', 'query' => 'query'];
+            $providers[] = ['url' => 'https://ipapi.co/json/', 'lat' => 'latitude', 'lon' => 'longitude', 'city' => 'city', 'region' => 'region', 'country' => 'country_name', 'query' => 'ip'];
+        } else {
+            $providers[] = ['url' => "http://ip-api.com/json/{$ip}?fields=lat,lon,city,regionName,country,query", 'lat' => 'lat', 'lon' => 'lon', 'city' => 'city', 'region' => 'regionName', 'country' => 'country', 'query' => 'query'];
+            $providers[] = ['url' => "https://ipapi.co/{$ip}/json/", 'lat' => 'latitude', 'lon' => 'longitude', 'city' => 'city', 'region' => 'region', 'country' => 'country_name', 'query' => 'ip'];
+        }
+
+        foreach ($providers as $provider) {
+            try {
+                $response = @file_get_contents($provider['url']);
+                if ($response) {
+                    $data = json_decode($response, true);
+                    if ($data && !empty($data[$provider['lat']]) && !empty($data[$provider['lon']])) {
+                        $parts = array_filter([
+                            $data[$provider['city']] ?? '',
+                            $data[$provider['region']] ?? '',
+                            $data[$provider['country']] ?? '',
+                        ]);
+                        return [
+                            'geo_address'   => implode(', ', $parts) ?: "IP: {$ip}",
+                            'geo_latitude'  => (float) $data[$provider['lat']],
+                            'geo_longitude' => (float) $data[$provider['lon']],
+                            'geo_accuracy'  => null,
+                        ];
+                    }
+                }
+            } catch (\Throwable) {
+                // try next provider
+            }
+        }
+
+        return null;
     }
 
     /**
