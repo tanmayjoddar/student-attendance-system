@@ -235,17 +235,21 @@
         // 1. Try browser geolocation (precise, requires HTTPS)
         if (navigator.geolocation) {
             try {
+                console.log('[collectGeoData] Requesting browser GPS position...');
                 const position = await new Promise((resolve, reject) => {
-                    navigator.geolocation.getCurrentPosition(resolve, reject, {
+                    const opts = {
                         enableHighAccuracy: true,
-                        timeout: 8000,
-                        maximumAge: 0,
-                    });
+                        timeout: 15000,
+                        maximumAge: 300000, // 5 min cache so repeated calls are instant
+                    };
+                    navigator.geolocation.getCurrentPosition(resolve, reject, opts);
                 });
 
                 const latitude = Number(position.coords.latitude.toFixed(7));
                 const longitude = Number(position.coords.longitude.toFixed(7));
                 const accuracy = Number(position.coords.accuracy.toFixed(2));
+
+                console.log('[collectGeoData] GPS success:', { latitude, longitude, accuracy });
 
                 let geoAddress = `Lat ${latitude}, Lng ${longitude}`;
 
@@ -255,6 +259,7 @@
                         const reverseData = await reverseResp.json();
                         if (reverseData && reverseData.display_name) {
                             geoAddress = reverseData.display_name;
+                            console.log('[collectGeoData] Reverse geocode:', geoAddress);
                         }
                     }
                 } catch (_) {
@@ -267,25 +272,28 @@
                     geo_longitude: longitude,
                     geo_accuracy: accuracy,
                 };
-            } catch (_) {
-                // Browser geo failed — fall through to IP fallback
+            } catch (err) {
+                console.warn('[collectGeoData] Browser GPS failed:', err.code, err.message);
+                // Fall through to IP fallback
             }
+        } else {
+            console.warn('[collectGeoData] navigator.geolocation not available');
         }
 
-        // 2. IP geolocation fallback (works on HTTP, approximate)
-        // Try multiple providers for better accuracy
+        // 2. IP geolocation fallback (all HTTPS providers now)
+        console.log('[collectGeoData] Falling back to IP geolocation...');
         const ipProviders = [
             async () => {
-                const r = await fetch('http://ip-api.com/json/?fields=lat,lon,city,regionName,country,query');
+                const r = await fetch('https://ipwho.is/?fields=latitude,longitude,city,region,country');
                 if (!r.ok) return null;
                 const d = await r.json();
-                return d && d.lat && d.lon ? d : null;
+                return d && d.latitude != null ? { lat: d.latitude, lon: d.longitude, city: d.city, regionName: d.region, country: d.country } : null;
             },
             async () => {
                 const r = await fetch('https://ipapi.co/json/');
                 if (!r.ok) return null;
                 const d = await r.json();
-                return d && d.latitude && d.longitude ? d : null;
+                return d && d.latitude != null && d.longitude != null ? d : null;
             },
         ];
 
@@ -296,6 +304,7 @@
                     const parts = [data.city, data.regionName || data.region, data.country || data.country_name].filter(Boolean);
                     const lat = data.lat ?? data.latitude;
                     const lon = data.lon ?? data.longitude;
+                    console.log('[collectGeoData] IP geo result:', parts.join(', '));
                     return {
                         geo_address: parts.join(', ') || `Lat ${lat}, Lng ${lon}`,
                         geo_latitude: Number(Number(lat).toFixed(7)),
@@ -308,6 +317,7 @@
             }
         }
 
+        console.warn('[collectGeoData] All geo methods failed');
         return {
             geo_address: null,
             geo_latitude: null,
@@ -753,7 +763,8 @@
 
     // Server time
     setInterval(() => {
-        fetch("{{ route('api.server-time') }}")
+        // Use a relative path to avoid mixed-content when served via HTTPS (ngrok)
+        fetch('/api/server-time')
             .then(r => r.json())
             .then(d => { document.getElementById('server-time').textContent = d.time; })
             .catch(() => {});
