@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Student;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -21,15 +22,21 @@ class AdminStudentController extends Controller
         return view('admin.students.index', compact('students'));
     }
 
-    public function exportCsv()
+    public function exportCsv(Request $request)
     {
-        $filename = 'students_export_' . date('Ymd_His') . '.csv';
-        $students = Student::orderBy('student_id')->get();
+        [$students, $fromDate, $toDate] = $this->studentsForExport($request);
+        if (!$students) {
+            return redirect()->route('admin.students.index')
+                ->with('error', 'Please select a valid date range. The start date must be before or equal to the end date.')
+                ->withInput();
+        }
+
+        $filename = $this->exportFilename('csv', $fromDate, $toDate);
 
         $response = new StreamedResponse(function () use ($students) {
             $handle = fopen('php://output', 'w');
             // Header row
-            fputcsv($handle, ['Student ID', 'First Name', 'Last Name', 'Email', 'Phone', 'Department', 'Semester', 'Active', 'Registered At']);
+            fputcsv($handle, ['Student ID', 'First Name', 'Last Name', 'Email', 'Phone', 'Department', 'Location / Address', 'Active', 'Registered At']);
 
             foreach ($students as $s) {
                 fputcsv($handle, [
@@ -39,7 +46,7 @@ class AdminStudentController extends Controller
                     $s->email,
                     $s->phone,
                     $s->department,
-                    $s->semester,
+                    $s->address,
                     $s->is_active ? 'Yes' : 'No',
                     optional($s->created_at)->toDateTimeString(),
                 ]);
@@ -55,29 +62,64 @@ class AdminStudentController extends Controller
         return $response;
     }
 
-    public function exportPdf()
+    public function exportPdf(Request $request)
     {
-        $students = Student::orderBy('student_id')->get();
+        [$students, $fromDate, $toDate] = $this->studentsForExport($request);
+        if (!$students) {
+            return redirect()->route('admin.students.index')
+                ->with('error', 'Please select a valid date range. The start date must be before or equal to the end date.')
+                ->withInput();
+        }
 
         // If Dompdf is available, use it
         if (class_exists('\Dompdf\Dompdf')) {
-            $html = view('admin.students._export_table', compact('students'))->render();
+            $html = view('admin.students._export_table', compact('students', 'fromDate', 'toDate'))->render();
             $dompdf = new \Dompdf\Dompdf();
             $dompdf->loadHtml($html);
             $dompdf->setPaper('A4', 'landscape');
             $dompdf->render();
             return Response::make($dompdf->output(), 200, [
                 'Content-Type' => 'application/pdf',
-                'Content-Disposition' => 'attachment; filename="students_export_' . date('Ymd_His') . '.pdf"'
+                'Content-Disposition' => 'attachment; filename="' . $this->exportFilename('pdf', $fromDate, $toDate) . '"'
             ]);
         }
 
         // Fallback: return an HTML download (user can Save as PDF from browser)
-        $html = view('admin.students._export_table', compact('students'))->render();
+        $html = view('admin.students._export_table', compact('students', 'fromDate', 'toDate'))->render();
         return Response::make($html, 200, [
             'Content-Type' => 'text/html; charset=UTF-8',
-            'Content-Disposition' => 'attachment; filename="students_export_' . date('Ymd_His') . '.html"'
+            'Content-Disposition' => 'attachment; filename="' . $this->exportFilename('html', $fromDate, $toDate) . '"'
         ]);
+    }
+
+    protected function studentsForExport(Request $request): array
+    {
+        $validated = $request->validate([
+            'from_date' => ['required', 'date'],
+            'to_date' => ['required', 'date'],
+        ]);
+
+        $fromDate = Carbon::parse($validated['from_date'])->startOfDay();
+        $toDate = Carbon::parse($validated['to_date'])->endOfDay();
+
+        if ($fromDate->gt($toDate)) {
+            return [null, null, null];
+        }
+
+        $students = Student::whereBetween('created_at', [$fromDate, $toDate])
+            ->orderBy('student_id')
+            ->get();
+
+        return [$students, $fromDate, $toDate];
+    }
+
+    protected function exportFilename(string $extension, ?Carbon $fromDate, ?Carbon $toDate): string
+    {
+        if ($fromDate && $toDate) {
+            return 'students_export_' . $fromDate->format('Ymd') . '_to_' . $toDate->format('Ymd') . '.' . $extension;
+        }
+
+        return 'students_export_' . date('Ymd_His') . '.' . $extension;
     }
 
     public function create()

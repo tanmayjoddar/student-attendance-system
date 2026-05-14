@@ -24,7 +24,10 @@
         }
     </style>
 
-    <h2 style="margin:0 0 12px 0;">Students Export</h2>
+    <h2 style="margin:0 0 6px 0;">Students Export</h2>
+    <div style="margin:0 0 12px 0; color:#666;">
+        Date range: {{ optional($fromDate)->format('Y-m-d') ?? 'N/A' }} to {{ optional($toDate)->format('Y-m-d') ?? 'N/A' }}
+    </div>
     <table>
         <thead>
             <tr>

@@ -3,12 +3,32 @@
 @section('admin-content')
 <div class="d-flex flex-justify-between flex-items-center mb-4">
     <h2 style="margin:0; font-size: 24px;">Students</h2>
-    <div style="display:flex; gap:8px;">
-        <a href="{{ route('admin.students.create') }}" class="btn btn-primary">Add Student</a>
-        <a href="{{ route('admin.students.export.csv') }}" class="btn">Export CSV</a>
-        <a href="{{ route('admin.students.export.pdf') }}" class="btn">Export PDF</a>
+</div>
+
+<div class="Box mb-4">
+    <div class="Box-body">
+        <form method="GET" action="{{ route('admin.students.export.csv') }}" class="d-flex flex-wrap" style="gap:12px; align-items:end;">
+            <div>
+                <label for="from_date" class="form-label">From Date</label>
+                <input type="date" id="from_date" name="from_date" value="{{ request('from_date') }}" required class="form-control">
+            </div>
+            <div>
+                <label for="to_date" class="form-label">To Date</label>
+                <input type="date" id="to_date" name="to_date" value="{{ request('to_date') }}" required class="form-control">
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button type="submit" class="btn btn-primary">Download CSV</button>
+                <button type="submit" class="btn" formaction="{{ route('admin.students.export.pdf') }}">Download PDF</button>
+                <a href="{{ route('admin.students.create') }}" class="btn">Add Student</a>
+            </div>
+        </form>
+        <div class="text-small text-muted mt-2">Choose a valid date range. The start date must be on or before the end date.</div>
     </div>
 </div>
+
+@if(session('error'))
+    <div class="flash flash-error mb-4">{{ session('error') }}</div>
+@endif
 
 <div class="Box">
     <div class="Box-body" style="padding:0;">
