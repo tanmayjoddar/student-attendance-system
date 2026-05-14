@@ -64,7 +64,7 @@ class AdminStudentController extends Controller
             $html = view('admin.students._export_table', compact('students'))->render();
             $dompdf = new \Dompdf\Dompdf();
             $dompdf->loadHtml($html);
-            $dompdf->setPaper('A4', 'portrait');
+            $dompdf->setPaper('A4', 'landscape');
             $dompdf->render();
             return Response::make($dompdf->output(), 200, [
                 'Content-Type' => 'application/pdf',
