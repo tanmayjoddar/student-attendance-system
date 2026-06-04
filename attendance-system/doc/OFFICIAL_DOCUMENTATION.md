@@ -27,12 +27,12 @@
 
 ## 1. Project Overview
 
-The **Attendance System** is a Laravel 12-based biometric attendance tracking application that combines **client-side liveness detection** (MediaPipe FaceMesh via CDN WebAssembly) with an **external ML microservice** (FastAPI, port 8001) for deep-learning-based face identification. The system uses a **kiosk-first** approach: students register once (self-service or admin-created), then check in and out daily by looking at a kiosk camera. Face identification is automatic — no manual student selection required.
+The **Attendance System** is a Laravel 12-based biometric attendance tracking application that uses **client-side liveness detection** (MediaPipe FaceMesh via CDN WebAssembly) for anti-spoofing and an **external ML microservice** (FastAPI, port 8001) for face identification. The system uses a **kiosk-first** approach: students register once (self-service or admin-created), then check in and out daily by looking at a kiosk camera. Face identification is automatic — no manual student selection required.
 
 ### Core Tenets
 
 - **Kiosk-first**: No student login at the point of entry. Students simply look at the camera; the system identifies them and records attendance automatically.
-- **Dual verification**: A two-layer approach — (1) client-side geometric landmark signatures (via MediaPipe, 80 landmarks → 160 normalized values) and (2) ML microservice deep-learning embeddings for cross-validation.
+- **Liveness + Identification separated**: MediaPipe FaceMesh handles only client-side liveness (anti-spoofing via blink/head-turn challenges). The ML microservice handles all face identification independently — no geometric signatures used for attendance.
 - **Liveness challenge**: 6 randomized challenges (blink, turn left, turn right, open mouth, nod, raise eyebrows). On each kiosk session, 2 challenges are selected at random to prevent replay attacks.
 - **Full audit trail**: Every attendance mutation (create, override) is logged with old/new values, user ID, and IP address.
 - **Geo-location tracking**: Multi-provider fallback chain — browser GPS → Nominatim reverse geocode → ipwho.is → ipapi.co → server-side IP geolocation.
@@ -42,8 +42,7 @@ The **Attendance System** is a Laravel 12-based biometric attendance tracking ap
 
 | Metric | Value |
 |--------|-------|
-| Face signature landmarks | 80 points normalized → 160 float values |
-| Minimum signature length for registration | 140 values |
+| ML identification confidence threshold | 60% (configurable via `ATTENDANCE_FACE_MIN_MATCH`) |
 | Face match threshold | 60% (configurable via `ATTENDANCE_FACE_MIN_MATCH`) |
 | Liveness score threshold | 75% (configurable via `ATTENDANCE_FACE_MIN_LIVENESS`) |
 | Check-in window | 00:00 – 23:59 daily |
@@ -66,67 +65,49 @@ The **Attendance System** is a Laravel 12-based biometric attendance tracking ap
 |  |  FaceMesh         |--->|  - 6 challenge types          |       |
 |  |  (CDN)            |    |  - 2 random per session       |       |
 |  |                   |    |  - EAR calculation for blinks |       |
-|  |  80 landmarks     |    |  - Yaw detection for turns   |       |
-|  |  extracted per    |    |  - Mouth AR for open mouth   |       |
-|  |  frame            |    |  - Pitch baseline for nods   |       |
-|  +-------------------+    |  - Brow distance for eyebrows |       |
-|                           +-------------------------------+       |
-|                                     |                             |
-|                                     v                             |
-|                          +------------------------+               |
-|                          |  Capture & Identify    |              |
-|                          |  (canvas -> blob ->    |              |
-|                          |   POST /identify/)     |              |
-|                          +-----------+-----------+               |
-+--------------------------------------+---------------------------+
-                                       | HTTP :8001
-                                       v
-+-------------------------------------------------------------------+
-|                  ML MICROSERVICE (FastAPI)                        |
-|                                                                   |
-|  +------------------------------------------------------------+   |
-|  |  Endpoints:                                                |   |
-|  |  POST /register/   -- Register face with 2 photos         |   |
-|  |  POST /identify/   -- Identify student from live frame    |   |
-|  |  DELETE /delete/   -- Remove face embeddings              |   |
-|  +------------------------------------------------------------+   |
-+-------------------------------------------------------------------+
-                                       |
-                                       v
-+-------------------------------------------------------------------+
-|                    LARAVEL APPLICATION                            |
-|                                                                   |
-|  +----------+  +-----------+  +------------+  +-----------+       |
-|  |Kiosk     |  |Admin      |  |Student     |  |API Proxy  |       |
-|  |Routes    |  |Routes     |  |Routes      |  |Routes     |       |
-|  |(public)  |  |(auth+role)|  |(auth+role) |  |(throttled)|       |
-|  +----+-----+  +-----+-----+  +-----+------+  +-----+-----+       |
-|       |              |              |               |             |
-|       v              v              v               v             |
-|  +------------------------------------------------------------+   |
-|  |              AttendanceService (528 lines)                  |   |
-|  |  checkIn / checkOut / autoCheckIn / autoCheckOut /         |   |
-|  |  adminOverride / getHeatmapData / getTodayStatus /         |   |
-|  |  detectSuspiciousIPs / validateStatedTime /                |   |
-|  |  validateFaceVerification / normalizeGeoData /             |   |
-|  |  ipGeolocation / createAuditTrail / resolveSubmittedBy    |   |
-|  +------------------------------------------------------------+   |
-|                          |                                       |
-|                          v                                       |
-|  +------------------------------------------------------------+   |
-|  |              MODELS                                         |   |
-|  |  Student (51 lines)     face_signature as array cast        |   |
-|  |  AttendanceLog (72 l.)  verification_meta as array cast     |   |
-|  |  AuditTrail (34 l.)     old/new_values as array cast        |   |
-|  |  User (66 lines)        isAdmin() / isStudent()             |   |
-|  +------------------------------------------------------------+   |
-|                          |                                       |
-|                          v                                       |
-|  +------------------------------------------------------------+   |
-|  |              12 MIGRATIONS -> SQL Schema                    |   |
-|  |  students, attendance_logs, audit_trail, users w/ FK        |   |
-|  +------------------------------------------------------------+   |
-+-------------------------------------------------------------------+
+|  |  Liveness only    |    |  - Yaw detection for turns   |       |
+|  |  (no face storage)|    |  - Mouth AR for open mouth   |       |
+|  |                   |    |  - Pitch baseline for nods   |       |
+|  |                   |    |  - Brow distance for eyebrows |       |
+|  +-------------------+    +-------------------------------+       |
+|                            |              |                       |
+|                            | (liveness    | (after liveness       |
+|                            |  passes)     |  passes, capture      |
+|                            v              |  frame & identify)    |
+|                            +              v                       |
+|  +----------------------------------------+-----------+           |
+|  |  Capture frame -> POST /identify/                  |           |
+|  |  (direct to ML :8001, not through Laravel)          |           |
+|  +------------------------+---------------------------+           |
+|                           |                                       |
++---------------------------+---------------------------------------+
+                            |
+               +------------+------------+
+               |                         |
+               | POST /identify/         | POST /attendance/auto-checkin
+               | (:8001)                 | (Laravel)
+               v                         v
++-----------------------------+  +-----------------------------+
+| ML MICROSERVICE (FastAPI)   |  | LARAVEL APPLICATION        |
+|                             |  |                             |
+| POST /register/             |  | AttendanceService           |
+| POST /identify/             |  | checkIn/checkOut/           |
+| DELETE /delete/{user_id}    |  | autoCheckIn/autoCheckOut    |
+|                             |  | adminOverride               |
++-----------------------------+  | getHeatmapData              |
+                                 | getTodayStatus              |
+                                 | detectSuspiciousIPs         |
+                                 | validateFaceVerification    |
+                                 | normalizeGeoData            |
+                                 +------+---------------------+
+                                        |
+                                        v
+                                 +------+---------------------+
+                                 | DB / MODELS / MIGRATIONS   |
+                                 | students, attendance_logs, |
+                                 | audit_trail, users         |
+                                 +----------------------------+
+
 ```
 
 ### Key Design Decisions
@@ -134,10 +115,10 @@ The **Attendance System** is a Laravel 12-based biometric attendance tracking ap
 | Decision | Rationale |
 |----------|-----------|
 | Client-side liveness (MediaPipe WASM) | Zero server load per frame; liveness checks happen entirely in-browser; network requests only for final identification |
-| External ML microservice | Keeps Laravel lightweight; allows independent GPU scaling for deep learning inference |
+| External ML microservice | Keeps Laravel lightweight; ML service handles all face identification independently |
 | 6 randomized challenges, 2 per session | Balance between security and UX — too many challenges degrade throughput |
 | Database-driven sessions | Required for API-based face identification flow (kiosk doesn't maintain session state across requests) |
-| Multi-provider geo fallback | Maximizes reliability across network conditions; Nominatim for GPS→address, IP providers for non-GPS environments |
+| Multi-provider geo fallback | Maximizes reliability across network conditions; Nominatim for GPS->address, IP providers for non-GPS environments |
 | Database transactions for attendance | Ensures attendance_log + audit_trail are created atomically — no partial writes |
 
 ---
@@ -169,9 +150,9 @@ The **Attendance System** is a Laravel 12-based biometric attendance tracking ap
 | Technology | Purpose |
 |------------|---------|
 | FastAPI (Python) | Face identification API server on port 8001 |
-| POST /register/ | Register face embeddings from 2 photos (multipart) |
+| POST /register/ | Register face using 2 photos (multipart) |
 | POST /identify/ | Identify student from a single live frame (multipart) |
-| DELETE /delete/{user_id} | Remove face embeddings for a student |
+| DELETE /delete/{user_id} | Remove face data for a student |
 
 ---
 
@@ -636,32 +617,36 @@ public function handle(Request $request, Closure $next, string $role): Response
 
 ## 10. Face Verification Pipeline
 
-### 10.1 Architecture Overview
+### 10.1 Architecture
 
-The face verification system uses a **dual-layer approach**:
+The face verification system separates liveness detection from identification into two independent systems:
 
 ```
 +-------------------------------------------------------------------+
-|  LAYER 1: Client-Side (MediaPipe FaceMesh WASM)                   |
+|  LIVENESS: Client-Side (MediaPipe FaceMesh WASM)                  |
 |                                                                    |
-|  1. 468 facial landmarks detected per frame                        |
-|  2. 80 specific landmarks extracted for signature                  |
-|  3. Normalized to 160 float values (x,y pairs / eyeDist, faceH)   |
-|  4. Liveness challenges executed locally (no server round-trip)    |
-|  5. Geometric signature stored in students.face_signature (JSON)   |
+|  1. 468 facial landmarks detected per frame in browser             |
+|  2. Liveness challenges evaluated against landmarks in real-time   |
+|  3. Challenges: blink, head turn, mouth open, nod, eyebrow raise  |
+|  4. NO face data stored or sent to server from this layer         |
+|  5. Only the final liveness_score (0-100) is sent to server       |
 +-------------------------------------------------------------------+
+                              |
+                     (pass/fail signal)
                               |
                               v
 +-------------------------------------------------------------------+
-|  LAYER 2: ML Microservice (FastAPI on :8001)                      |
+|  IDENTIFICATION: ML Microservice (FastAPI on :8001)               |
 |                                                                    |
-|  1. Two photos uploaded during registration                       |
-|  2. Deep learning embeddings generated and stored                  |
-|  3. Live frame sent to POST /identify/ for identification          |
-|  4. Returns user_id + confidence score                            |
-|  5. DELETE /delete/{user_id} removes embeddings on student delete  |
+|  1. Two photos uploaded during registration (multipart)           |
+|  2. ML service stores face data from registration photos          |
+|  3. Live frame sent to POST /identify/ for matching               |
+|  4. Returns user_id + confidence score (0-100)                    |
+|  5. DELETE /delete/{user_id} removes face data on student delete  |
 +-------------------------------------------------------------------+
 ```
+
+**Key point:** The `face_signature` column in `students` table and the `extractSignature()` / `similarityScore()` functions in the student dashboard view are from a **previous approach** and are NOT used in the current kiosk attendance flow. The kiosk relies entirely on the ML microservice for identification.
 
 ### 10.2 Challenge System (Kiosk)
 
@@ -669,12 +654,12 @@ The face verification system uses a **dual-layer approach**:
 
 | # | Challenge ID | Instruction | Detection Logic |
 |---|-------------|-------------|-----------------|
-| 1 | `blink` | "Blink your eyes" | Eye Aspect Ratio < 0.20 indicates closure; EAR ≥ 0.22 after closure = blink complete; requires 8 hold frames |
-| 2 | `turn_left` | "Turn your head LEFT" | Nose tip (lm[1].x) — eye midpoint (lm[33].x + lm[263].x / 2) < -0.04 |
-| 3 | `turn_right` | "Turn your head RIGHT" | Nose tip (lm[1].x) — eye midpoint > 0.04 |
+| 1 | `blink` | "Blink your eyes" | Eye Aspect Ratio < 0.20 indicates closure; EAR >= 0.22 after closure = blink complete; requires 8 hold frames |
+| 2 | `turn_left` | "Turn your head LEFT" | Nose tip (lm[1].x) - eye midpoint (lm[33].x + lm[263].x / 2) < -0.04 |
+| 3 | `turn_right` | "Turn your head RIGHT" | Nose tip (lm[1].x) - eye midpoint > 0.04 |
 | 4 | `open_mouth` | "Open your mouth wide" | Vertical distance between lip landmarks 13 and 14 > 0.04 |
-| 5 | `nod` | "Nod your head DOWN" | Pitch (lm[1].y — lm[10].y) — baseline > 0.03 |
-| 6 | `raise_eyebrows` | "Raise your eyebrows UP" | Brow distance (lm[159].y — lm[70].y) — baseline (averaged over 20 frames) > 0.018 |
+| 5 | `nod` | "Nod your head DOWN" | Pitch (lm[1].y - lm[10].y) - baseline > 0.03 |
+| 6 | `raise_eyebrows` | "Raise your eyebrows UP" | Brow distance (lm[159].y - lm[70].y) - baseline (averaged over 20 frames) > 0.018 |
 
 **Selection algorithm** (`pickChallenges()`):
 ```javascript
@@ -698,18 +683,19 @@ function pickChallenges() {
 4. POST blob to http://127.0.0.1:8001/identify/
 5. If matched:
    a. POST /attendance/auto-checkin with {student_id, liveness_score, match_score, geo}
-   b. If already checked in → POST /attendance/auto-checkout
-6. If not matched → 5-second retry timer
-7. 8-second success display → auto-reset for next student
+   b. If already checked in -> POST /attendance/auto-checkout
+6. If not matched -> 5-second retry timer
+7. 8-second success display -> auto-reset for next student
 ```
 
-### 10.4 Face Signature Extraction (Registration)
+### 10.4 Face Signature Extraction (Legacy - Registration Only)
 
-Used in `register-student.blade.php` `extractSignature()` function (line 181–205):
+During self-registration, a MediaPipe-based geometric signature is extracted from Photo 1 and stored in `students.face_signature`. This is **legacy data** from a previous approach and is NOT used by the current kiosk attendance flow. The ML microservice receives both photos for identification processing.
+
+The `extractSignature()` function in `register-student.blade.php` (lines 181-205):
 
 ```javascript
 function extractSignature(landmarks) {
-    // 80 landmark indices selected from 468
     const idx = [1,33,263,61,291,199,152,10,234,454, ...]; // 80 indices
     const le = landmarks[33], re = landmarks[263];
     const ch = landmarks[152], fh = landmarks[10];
@@ -717,7 +703,6 @@ function extractSignature(landmarks) {
     const faceH   = dist(ch, fh) || 1;
     const cx = (le.x + re.x) / 2;
     const cy = (le.y + re.y) / 2;
-
     const v = [];
     idx.forEach(i => {
         v.push((landmarks[i].x - cx) / eyeDist);
@@ -727,55 +712,35 @@ function extractSignature(landmarks) {
 }
 ```
 
-The resulting array contains 160 float values (80 landmarks × 2 coordinates) normalized by eye distance for x and face height for y, centered around the eye midpoint. This is stored as JSON in `students.face_signature`.
+The resulting array contains 160 float values (80 landmarks x 2 coordinates) normalized by eye distance for x and face height for y, centered around the eye midpoint. This is stored as JSON in `students.face_signature` but is **not consumed** by the kiosk identification flow.
 
-### 10.5 Face Match Score (Student Dashboard)
+### 10.5 Server-Side Verification Validation
 
-The student dashboard uses **cosine similarity** between the live extracted signature and the stored signature:
-
-```javascript
-function similarityScore(a, b) {
-    let dot = 0, magA = 0, magB = 0;
-    for (let i = 0; i < a.length; i++) {
-        dot += a[i] * b[i];
-        magA += a[i] * a[i];
-        magB += b[i] * b[i];
-    }
-    const denom = Math.sqrt(magA) * Math.sqrt(magB) || 1;
-    const cosine = dot / denom;
-    return Math.max(0, Math.min(100, ((cosine + 1) / 2) * 100));
-}
-```
-
-This maps cosine similarity (range -1 to 1) to a 0–100 percentage.
-
-### 10.6 Verification Validation (Server-Side)
-
-`AttendanceService@validateFaceVerification()` (lines 504–527) enforces:
+`AttendanceService@validateFaceVerification()` (lines 504-527) enforces four checks for the student-dashboard (authenticated) check-in/out flow:
 
 1. `face_verified` must be `true`.
 2. `spoof_passed` must be `true`.
 3. `liveness_score` >= `config('attendance.face.min_liveness_score')` (default: 75).
 4. `match_score` >= `config('attendance.face.min_match_score')` (default: 60).
 
-If any check fails, an `InvalidArgumentException` is thrown. The auto-checkin/auto-checkout methods (`autoCheckIn`, `autoCheckOut`) skip this validation since the ML microservice identification IS the verification.
+If any check fails, an `InvalidArgumentException` is thrown. The auto-checkin/auto-checkout methods (`autoCheckIn`, `autoCheckOut`) **skip this validation entirely** since the ML microservice identification result is considered sufficient verification.
 
-### 10.7 Student Dashboard Liveness (Student-Logged-In Flow)
+### 10.6 Student Dashboard Liveness (Authenticated Flow)
 
-The student dashboard (`student/dashboard.blade.php`) uses a different, simpler liveness model:
+The student dashboard (`student/dashboard.blade.php`) uses a simplified liveness-only model (no ML identification):
 
 | Metric | Threshold | Weight |
 |--------|-----------|--------|
-| Blink count | ≥ 1 blink | 45 points |
+| Blink count | >= 1 blink | 45 points |
 | Yaw variance | Scaled by 1800 | Up to 55 points |
-| Live frames | ≥ 15 | Gate |
-| Overall threshold | ≥ 70 | Pass |
+| Live frames | >= 15 | Gate |
+| Overall threshold | >= 70 | Pass |
 
 ```
 livenessScore = min(100, (blinkCount >= 1 ? 45 : 0) + min(55, yawVariance * 1800))
 ```
 
-Verification expires after 60 seconds (`verificationAt` timestamp check). The submission buttons are disabled unless verification is fresh and active.
+The student dashboard also computes a cosine similarity match against the stored `face_signature` (legacy), but this is **not the primary identification mechanism** for the kiosk. Verification expires after 60 seconds (`verificationAt` timestamp check).
 
 ---
 
@@ -960,7 +925,7 @@ Verification expires after 60 seconds (`verificationAt` timestamp check). The su
     |
     +-- Lists what will be permanently deleted:
     |   +-- All attendance records
-    |   +-- Face recognition data and embeddings
+    |   +-- Face recognition data
     |   +-- Student photo from storage
     |   +-- User account and login credentials
     |   +-- Student profile record
