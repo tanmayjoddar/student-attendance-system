@@ -58,75 +58,75 @@ The **Attendance System** is a Laravel 12-based biometric attendance tracking ap
 ## 2. Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        BROWSER (Kiosk)                          │
-│                                                                 │
-│  ┌──────────────────┐    ┌──────────────────────────────┐      │
-│  │  MediaPipe WASM   │    │  JavaScript Liveness Engine   │      │
-│  │  FaceMesh         │───▶│  - 6 challenge types         │      │
-│  │  (CDN)            │    │  - 2 random per session      │      │
-│  │                   │    │  - EAR calculation for blinks │      │
-│  │  80 landmarks     │    │  - Yaw detection for turns   │      │
-│  │  extracted per    │    │  - Mouth AR for open mouth   │      │
-│  │  frame            │    │  - Pitch baseline for nods   │      │
-│  └──────────────────┘    │  - Brow distance for eyebrows │      │
-│                          └──────────────────────────────┘      │
-│                                     │                           │
-│                                     ▼                           │
-│                          ┌──────────────────────┐               │
-│                          │  Capture & Identify   │              │
-│                          │  (canvas → blob →     │              │
-│                          │   POST /identify/)    │              │
-│                          └──────────┬───────────┘               │
-└─────────────────────────────────────┼───────────────────────────┘
-                                      │ HTTP :8001
-                                      ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                  ML MICROSERVICE (FastAPI)                      │
-│                                                                 │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  Endpoints:                                              │   │
-│  │  POST /register/   — Register face with 2 photos        │   │
-│  │  POST /identify/   — Identify student from live frame   │   │
-│  │  DELETE /delete/   — Remove face embeddings             │   │
-│  └──────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
-                                      │
-                                      ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    LARAVEL APPLICATION                           │
-│                                                                 │
-│  ┌──────────┐  ┌───────────┐  ┌────────────┐  ┌───────────┐   │
-│  │Kiosk     │  │Admin      │  │Student     │  │API Proxy  │   │
-│  │Routes    │  │Routes     │  │Routes      │  │Routes     │   │
-│  │(public)  │  │(auth+role)│  │(auth+role) │  │(throttled)│   │
-│  └────┬─────┘  └─────┬─────┘  └─────┬──────┘  └─────┬─────┘   │
-│       │              │              │               │         │
-│       ▼              ▼              ▼               ▼         │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │              AttendanceService (528 lines)                │  │
-│  │  checkIn / checkOut / autoCheckIn / autoCheckOut /       │  │
-│  │  adminOverride / getHeatmapData / getTodayStatus /       │  │
-│  │  detectSuspiciousIPs / validateStatedTime /              │  │
-│  │  validateFaceVerification / normalizeGeoData /           │  │
-│  │  ipGeolocation / createAuditTrail / resolveSubmittedBy  │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                          │                                     │
-│                          ▼                                     │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │              MODELS                                       │  │
-│  │  Student (51 lines)     face_signature as array cast      │  │
-│  │  AttendanceLog (72 l.)  verification_meta as array cast   │  │
-│  │  AuditTrail (34 l.)     old/new_values as array cast      │  │
-│  │  User (66 lines)        isAdmin() / isStudent()           │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                          │                                     │
-│                          ▼                                     │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │              12 MIGRATIONS → SQL Schema                   │  │
-│  │  students, attendance_logs, audit_trail, usersw/ FK       │  │
-│  └──────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
++-------------------------------------------------------------------+
+|                        BROWSER (Kiosk)                            |
+|                                                                   |
+|  +-------------------+    +-------------------------------+       |
+|  |  MediaPipe WASM   |    |  JavaScript Liveness Engine   |       |
+|  |  FaceMesh         |--->|  - 6 challenge types          |       |
+|  |  (CDN)            |    |  - 2 random per session       |       |
+|  |                   |    |  - EAR calculation for blinks |       |
+|  |  80 landmarks     |    |  - Yaw detection for turns   |       |
+|  |  extracted per    |    |  - Mouth AR for open mouth   |       |
+|  |  frame            |    |  - Pitch baseline for nods   |       |
+|  +-------------------+    |  - Brow distance for eyebrows |       |
+|                           +-------------------------------+       |
+|                                     |                             |
+|                                     v                             |
+|                          +------------------------+               |
+|                          |  Capture & Identify    |              |
+|                          |  (canvas -> blob ->    |              |
+|                          |   POST /identify/)     |              |
+|                          +-----------+-----------+               |
++--------------------------------------+---------------------------+
+                                       | HTTP :8001
+                                       v
++-------------------------------------------------------------------+
+|                  ML MICROSERVICE (FastAPI)                        |
+|                                                                   |
+|  +------------------------------------------------------------+   |
+|  |  Endpoints:                                                |   |
+|  |  POST /register/   -- Register face with 2 photos         |   |
+|  |  POST /identify/   -- Identify student from live frame    |   |
+|  |  DELETE /delete/   -- Remove face embeddings              |   |
+|  +------------------------------------------------------------+   |
++-------------------------------------------------------------------+
+                                       |
+                                       v
++-------------------------------------------------------------------+
+|                    LARAVEL APPLICATION                            |
+|                                                                   |
+|  +----------+  +-----------+  +------------+  +-----------+       |
+|  |Kiosk     |  |Admin      |  |Student     |  |API Proxy  |       |
+|  |Routes    |  |Routes     |  |Routes      |  |Routes     |       |
+|  |(public)  |  |(auth+role)|  |(auth+role) |  |(throttled)|       |
+|  +----+-----+  +-----+-----+  +-----+------+  +-----+-----+       |
+|       |              |              |               |             |
+|       v              v              v               v             |
+|  +------------------------------------------------------------+   |
+|  |              AttendanceService (528 lines)                  |   |
+|  |  checkIn / checkOut / autoCheckIn / autoCheckOut /         |   |
+|  |  adminOverride / getHeatmapData / getTodayStatus /         |   |
+|  |  detectSuspiciousIPs / validateStatedTime /                |   |
+|  |  validateFaceVerification / normalizeGeoData /             |   |
+|  |  ipGeolocation / createAuditTrail / resolveSubmittedBy    |   |
+|  +------------------------------------------------------------+   |
+|                          |                                       |
+|                          v                                       |
+|  +------------------------------------------------------------+   |
+|  |              MODELS                                         |   |
+|  |  Student (51 lines)     face_signature as array cast        |   |
+|  |  AttendanceLog (72 l.)  verification_meta as array cast     |   |
+|  |  AuditTrail (34 l.)     old/new_values as array cast        |   |
+|  |  User (66 lines)        isAdmin() / isStudent()             |   |
+|  +------------------------------------------------------------+   |
+|                          |                                       |
+|                          v                                       |
+|  +------------------------------------------------------------+   |
+|  |              12 MIGRATIONS -> SQL Schema                    |   |
+|  |  students, attendance_logs, audit_trail, users w/ FK        |   |
+|  +------------------------------------------------------------+   |
++-------------------------------------------------------------------+
 ```
 
 ### Key Design Decisions
@@ -403,9 +403,9 @@ The middleware alias `attendance` is applied to:
 ### Entity-Relationship Summary
 
 ```
-users ───1:1─── students ───1:N─── attendance_logs
-  │                                   │
-  └─────── AuditTrail (user_id) ──────┘
+users ---1:1--- students ---1:N--- attendance_logs
+  |                                      |
+  +---------- AuditTrail (user_id) ------+
 ```
 
 ### Table: `students`
@@ -446,7 +446,7 @@ users ───1:1─── students ───1:N─── attendance_logs
 | `type` | `enum('in', 'out')` | NOT NULL | |
 | `recorded_time` | `timestamp` | NOT NULL | Server time when record was created |
 | `stated_time` | `timestamp` | NULLABLE | User-declared time (anti-cheat) |
-| `ip_address` | `string(45)` | NOT NULL | Client IP |
+| `ip_address` | `string` (default: 255) | NOT NULL | Client IP; no length constraint in migration |
 | `geo_address` | `text` | NULLABLE | Human-readable address; added in migration 000011 |
 | `geo_latitude` | `decimal(10,7)` | NULLABLE | Added in migration 000011 |
 | `geo_longitude` | `decimal(10,7)` | NULLABLE | Added in migration 000011 |
@@ -504,8 +504,8 @@ Standard Laravel cache table (migration 000001).
 | `GET` | `/attendance` | `attendance.kiosk` | `StudentDashboardController@kiosk` | None |
 | `POST` | `/attendance/check-in` | `attendance.check-in` | `StudentDashboardController@checkInPublic` | `throttle:attendance` |
 | `POST` | `/attendance/check-out` | `attendance.check-out` | `StudentDashboardController@checkOutPublic` | `throttle:attendance` |
-| `GET` | `/attendance/check-in` | — | Redirect with error message | None |
-| `GET` | `/attendance/check-out` | — | Redirect with error message | None |
+| `GET` | `/attendance/check-in` | — | Closure: redirect with error to kiosk | None |
+| `GET` | `/attendance/check-out` | — | Closure: redirect with error to kiosk | None |
 | `POST` | `/attendance/face-register` | `attendance.face-register` | `StudentDashboardController@registerFace` | `throttle:attendance` |
 | `GET` | `/student-register` | `student.register` | `StudentSelfRegistrationController@create` | None |
 | `POST` | `/student-register` | `student.register.store` | `StudentSelfRegistrationController@store` | `throttle:attendance` |
@@ -525,12 +525,14 @@ Standard Laravel cache table (migration 000001).
 
 ### ML Face Verification Proxy Routes
 
-| Method | URI | Name | Controller Method | Middleware |
-|--------|-----|------|-------------------|-----------|
-| `POST` | `/api/verify-face-ml` | — | `FaceVerificationController@verify` | None |
-| `POST` | `/api/register-face-ml` | — | `FaceVerificationController@register` | None |
-| `POST` | `/api/identify-face` | — | `FaceVerificationController@identify` | None |
-| `DELETE` | `/api/delete-face-ml/{studentId}` | — | `FaceVerificationController@deleteFromMl` | None |
+| Method | URI | Name | Controller Method | Middleware | Status |
+|--------|-----|------|-------------------|-----------|--------|
+| `POST` | `/api/verify-face-ml` | — | `FaceVerificationController@verify` | None | Defined in routes, method NOT YET IMPLEMENTED in controller |
+| `POST` | `/api/register-face-ml` | — | `FaceVerificationController@register` (exists) | None | Implemented |
+| `POST` | `/api/identify-face` | — | `FaceVerificationController@identify` | None | Defined in routes, method NOT YET IMPLEMENTED in controller |
+| `DELETE` | `/api/delete-face-ml/{studentId}` | — | `FaceVerificationController@deleteFromMl` (exists) | None | Implemented |
+
+> **Note:** The kiosk JavaScript calls `http://127.0.0.1:8001/identify/` directly from the browser (not through the Laravel proxy). The `/api/identify-face` and `/api/verify-face-ml` routes are defined in `routes/web.php` but their corresponding controller methods have not yet been implemented.
 
 ### Authentication Routes (Laravel Auth Scaffold)
 
@@ -639,26 +641,26 @@ public function handle(Request $request, Closure $next, string $role): Response
 The face verification system uses a **dual-layer approach**:
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  LAYER 1: Client-Side (MediaPipe FaceMesh WASM)                 │
-│                                                                  │
-│  1. 468 facial landmarks detected per frame                      │
-│  2. 80 specific landmarks extracted for signature                │
-│  3. Normalized to 160 float values (x,y pairs÷eyeDist, faceH)   │
-│  4. Liveness challenges executed locally (no server round-trip)  │
-│  5. Geometric signature stored in `students.face_signature` (JSON)│
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  LAYER 2: ML Microservice (FastAPI on :8001)                    │
-│                                                                  │
-│  1. Two photos uploaded during registration                     │
-│  2. Deep learning embeddings generated and stored                │
-│  3. Live frame sent to POST /identify/ for identification        │
-│  4. Returns user_id + confidence score                          │
-│  5. DELETE /delete/{user_id} removes embeddings on student delete│
-└─────────────────────────────────────────────────────────────────┘
++-------------------------------------------------------------------+
+|  LAYER 1: Client-Side (MediaPipe FaceMesh WASM)                   |
+|                                                                    |
+|  1. 468 facial landmarks detected per frame                        |
+|  2. 80 specific landmarks extracted for signature                  |
+|  3. Normalized to 160 float values (x,y pairs / eyeDist, faceH)   |
+|  4. Liveness challenges executed locally (no server round-trip)    |
+|  5. Geometric signature stored in students.face_signature (JSON)   |
++-------------------------------------------------------------------+
+                              |
+                              v
++-------------------------------------------------------------------+
+|  LAYER 2: ML Microservice (FastAPI on :8001)                      |
+|                                                                    |
+|  1. Two photos uploaded during registration                       |
+|  2. Deep learning embeddings generated and stored                  |
+|  3. Live frame sent to POST /identify/ for identification          |
+|  4. Returns user_id + confidence score                            |
+|  5. DELETE /delete/{user_id} removes embeddings on student delete  |
++-------------------------------------------------------------------+
 ```
 
 ### 10.2 Challenge System (Kiosk)
@@ -783,202 +785,203 @@ Verification expires after 60 seconds (`verificationAt` timestamp check). The su
 
 ```
 [Student approaches kiosk]
-    │
-    ▼
+    |
+    v
 [Page loads with camera off]
-    │
-    ▼
+    |
+    v
 [Student presses "Start Camera"]
-    │
-    ├── MediaPipe FaceMesh initializes (CDN WASM)
-    ├── GPS location request sent (async)
-    │   ├── GPS success → Nominatim reverse geocode
-    │   ├── GPS fail → ipwho.is → ipapi.co
-    │   └── All fail → geo_address = null
-    │
-    ▼
+    |
+    +-- MediaPipe FaceMesh initializes (CDN WASM)
+    +-- GPS location request sent (async)
+    |   +-- GPS success -> Nominatim reverse geocode
+    |   +-- GPS fail -> ipwho.is -> ipapi.co
+    |   +-- All fail -> geo_address = null
+    |
+    v
 [Face detected in frame]
-    │
-    ├── 2 random challenges selected
-    │
-    ▼
+    |
+    +-- 2 random challenges selected
+    |
+    v
 [Challenge 1 displayed on screen]
-    │
-    │   ┌─────────────────────────┐
-    │   │ e.g., "Turn your head   │
-    │   │        LEFT"            │
-    │   └─────────────────────────┘
-    │
-    ▼
+    |
+    |   +-----------------------+
+    |   | e.g., "Turn your head |
+    |   |        LEFT"          |
+    |   +-----------------------+
+    |
+    v
 [Student performs challenge]
-    │
-    ├── Challenge check runs per frame
-    ├── 5 consecutive frames of success required
-    │
-    ▼
-[Challenge 1 complete → Challenge 2 displayed]
-    │
-    │   ┌─────────────────────────┐
-    │   │ e.g., "Blink your eyes" │
-    │   └─────────────────────────┘
-    │
-    ▼
+    |
+    +-- Challenge check runs per frame
+    +-- 5 consecutive frames of success required
+    |
+    v
+[Challenge 1 complete -> Challenge 2 displayed]
+    |
+    |   +-----------------------+
+    |   | e.g., "Blink your eyes"|
+    |   +-----------------------+
+    |
+    v
 [Both challenges complete + 15 live frames]
-    │
-    ├── Liveness score = 100 (50+50)
-    │
-    ▼
+    |
+    +-- Liveness score = 100 (50+50)
+    |
+    v
 [5-second countdown overlay]
-    │
-    ▼
+    |
+    v
 [Canvas capture (JPEG)]
-    │
-    ▼
+    |
+    v
 [POST /identify/ to ML service :8001]
-    │
-    ├── Matched? ──yes──▶ POST /attendance/auto-checkin
-    │                           │
-    │                           ├── Success → "Check-In Successful"
-    │                           │
-    │                           └── Already checked in?
-    │                                   │
-    │                                   ▼
-    │                           POST /attendance/auto-checkout
-    │                                   │
-    │                                   ├── Success → "Check-Out Successful"
-    │                                   └── Already out → "Already Recorded"
-    │
-    └── Not matched? ──▶ "Not Recognized" → reset after 5 seconds
+    |
+    +-- Matched? --yes--> POST /attendance/auto-checkin
+    |                           |
+    |                           +-- Success -> "Check-In Successful"
+    |                           |
+    |                           +-- Already checked in?
+    |                                   |
+    |                                   v
+    |                           POST /attendance/auto-checkout
+    |                                   |
+    |                                   +-- Success -> "Check-Out Successful"
+    |                                   +-- Already out -> "Already Recorded"
+    |
+    +-- Not matched? --> "Not Recognized" -> reset after 5 seconds
 ```
 
 ### 11.2 Admin Manual Attendance Override Flow
 
 ```
 [Admin views attendance for a date]
-    │
-    ▼
+    |
+    v
 [Admin clicks "Details" on a student row]
-    │
-    ▼
+    |
+    v
 [Student attendance detail page shows all logs for that date]
-    │
-    ▼
+    |
+    v
 [Admin fills override form: new_time + reason (min 10 chars)]
-    │
-    ▼
+    |
+    v
 [POST /admin/attendance/{logId}/override]
-    │
-    ├── Validate input (new_time: required|date, reason: required|string|min:10|max:500)
-    │
-    ├── AttendanceService@adminOverride() called
-    │   ├── Find log by ID
-    │   ├── Snapshot old values
-    │   ├── Update: stated_time = new_time, is_flagged = true
-    │   ├── Create audit trail entry with action = 'override'
-    │   │   ├── old_values = snapshot before change
-    │   │   ├── new_values = snapshot after change
-    │   │   └── reason included in new_values
-    │   └── Return updated log
-    │
-    └── Redirect back with success message
+    |
+    +-- Validate input (new_time: required|date, reason: required|string|min:10|max:500)
+    |
+    +-- AttendanceService@adminOverride() called
+    |   +-- Find log by ID
+    |   +-- Snapshot old values
+    |   +-- Update: stated_time = new_time, is_flagged = true
+    |   +-- Create audit trail entry with action = 'override'
+    |   |   +-- old_values = snapshot before change
+    |   |   +-- new_values = snapshot after change
+    |   |   +-- reason included in new_values
+    |   +-- Return updated log
+    |
+    +-- Redirect back with success message
 ```
 
 ### 11.3 Student Self-Registration Flow
 
 ```
 [New student visits /student-register]
-    │
-    ▼
-[Student fills: first_name, last_name, father_name, mother_name, 
+    |
+    v
+[Student fills: first_name, last_name, father_name, mother_name,
  address, email, phone, department]
-    │
-    ▼
+    |
+    v
 [Student clicks "Open Camera"]
-    │
-    ├── getUserMedia({video: 320×240, facingMode: 'user'})
-    │
-    ▼
+    |
+    +-- getUserMedia({video: 320x240, facingMode: 'user'})
+    |
+    v
 [Student clicks "Capture Photo 1"]
-    │
-    ├── Canvas drawImage from live video
-    ├── Photo 1 base64 stored in hidden input
-    ├── Preview shown with green border
-    └── Overlay: "Now SLIGHTLY turn your head"
-    │
-    ▼
+    |
+    +-- Canvas drawImage from live video
+    +-- Photo 1 base64 stored in hidden input
+    +-- Preview shown with green border
+    +-- Overlay: "Now SLIGHTLY turn your head"
+    |
+    v
 [Student clicks "Capture Photo 2"]
-    │
-    ├── Canvas drawImage (slight head turn)
-    ├── Photo 2 base64 stored in hidden input
-    ├── Camera stream stopped
-    └── Face signature extracted from Photo 1 via MediaPipe
-    │
-    ▼
+    |
+    +-- Canvas drawImage (slight head turn)
+    +-- Photo 2 base64 stored in hidden input
+    +-- Camera stream stopped
+    +-- Face signature extracted from Photo 1 via MediaPipe
+    |
+    v
 [MediaPipe processes Photo 1]
-    │
-    ├── 80 landmark coordinates → 160 normalized values
-    ├── Serialized as JSON in hidden input
-    │
-    ▼
+    |
+    +-- 80 landmark coordinates -> 160 normalized values
+    +-- Serialized as JSON in hidden input
+    |
+    v
 [Student clicks "Register Myself"]
-    │
-    ├── POST /student-register
-    │
-    ├── Server-side validation:
-    │   ├── All required fields present
-    │   ├── Email unique check
-    │   ├── Full name uniqueness check (case-insensitive)
-    │   ├── Base64 photo decoding and validation
-    │   └── Face signature: JSON decode, array length ≥ 140, all numeric
-    │
-    ├── Student ID generated: STU-YYMMDD-XXXX (e.g., STU-260604-A7K2)
-    │
-    ├── Photo 1 saved to storage/app/public/students/{studentId}.jpg
-    │
-    ├── Student record created with all fields + face_signature + face_registered_at
-    │
-    ├── ML microservice registration (async, fire-and-forget):
-    │   ├── Temp files created for both photos
-    │   ├── POST http://127.0.0.1:8001/register/ (multipart)
-    │   │   ├── image1, image2 as file attachments
-    │   │   └── user_id = studentId
-    │   └── Temp files cleaned up
-    │
-    └── Redirect to kiosk with success message + student ID
+    |
+    +-- POST /student-register
+    |
+    +-- Server-side validation:
+    |   +-- All required fields present
+    |   +-- Email unique check
+    |   +-- Full name uniqueness check (case-insensitive)
+    |   +-- Base64 photo decoding and validation
+    |   +-- Face signature: JSON decode, array length >= 140, all numeric
+    |
+    +-- Student ID generated: STU-YYMMDD-XXXX (e.g., STU-260604-A7K2)
+    |
+    +-- Photo 1 saved to storage/app/public/students/{studentId}.jpg
+    |
+    +-- Student record created with all fields + face_signature + face_registered_at
+    |
+    +-- ML microservice registration (timeout=1s, fire-and-forget):
+    |   +-- Temp files created for both photos
+    |   +-- POST http://127.0.0.1:8001/register/ (multipart)
+    |   |   +-- image1, image2 as file attachments
+    |   |   +-- user_id = studentId
+    |   +-- Temp files cleaned up on completion
+    |   +-- Failure logged as warning, does not block registration
+    |
+    +-- Redirect to kiosk with success message + student ID
 ```
 
 ### 11.4 Student Deletion Flow (Admin)
 
 ```
 [Admin clicks "Delete" on a student row]
-    │
-    ▼
+    |
+    v
 [Confirmation modal appears with student details + warning]
-    │
-    ├── Lists what will be permanently deleted:
-    │   ├── All attendance records
-    │   ├── Face recognition data and embeddings
-    │   ├── Student photo from storage
-    │   ├── User account and login credentials
-    │   └── Student profile record
-    │
-    ▼
-[Admin confirms → DELETE /admin/students/{student}]
-    │
-    ├── AdminStudentController@destroy() executes:
-    │
-    │   1. DELETE http://127.0.0.1:8001/delete/{studentId} (ML microservice)
-    │      └── Failure is logged as warning, does NOT block deletion
-    │
-    │   2. Storage::disk('public')->delete($student->photo_path)
-    │
-    │   3. $student->attendanceLogs()->delete()
-    │
-    │   4. $student->user->delete()
-    │
-    │   5. $student->delete()
-    │
-    └── Redirect to student list with success message
+    |
+    +-- Lists what will be permanently deleted:
+    |   +-- All attendance records
+    |   +-- Face recognition data and embeddings
+    |   +-- Student photo from storage
+    |   +-- User account and login credentials
+    |   +-- Student profile record
+    |
+    v
+[Admin confirms -> DELETE /admin/students/{student}]
+    |
+    +-- AdminStudentController@destroy() executes:
+    |
+    |   1. DELETE http://127.0.0.1:8001/delete/{studentId} (ML microservice)
+    |      +-- Failure is logged as warning, does NOT block deletion
+    |
+    |   2. Storage::disk('public')->delete($student->photo_path)
+    |
+    |   3. $student->attendanceLogs()->delete()
+    |
+    |   4. $student->user->delete()
+    |
+    |   5. $student->delete()
+    |
+    +-- Redirect to student list with success message
 ```
 
 ### 11.5 Suspicious IP Detection Flow
