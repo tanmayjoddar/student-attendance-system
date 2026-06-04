@@ -206,17 +206,6 @@ attendance-system/
 │       ├── 2026_04_22_000009_add_unique_name_index_to_students_table.php
 │       ├── 2026_04_22_000010_add_guardian_fields_to_students_table.php
 │       └── 2026_05_08_000011_add_geo_fields_to_attendance_logs_table.php
-├── doc/
-│   ├── OFFICIAL_DOCUMENTATION.md               # This file
-│   ├── architecture.md
-│   ├── attendance-camera-flow.md
-│   ├── briliance.md
-│   ├── face-verification.md
-│   ├── fixed-implementation-plan.md
-│   ├── phase-report.md
-│   ├── planning.md
-│   ├── QA.md
-│   └── resume-metrics.md
 ├── resources/
 │   └── views/
 │       ├── layouts/
