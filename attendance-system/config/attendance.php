@@ -12,7 +12,7 @@ return [
     'min_checkin_duration' => env('ATTENDANCE_MIN_DURATION', 30),
 
     'rate_limit' => [
-        'max_attempts' => 5,
+        'max_attempts' => 60,
         'decay_minutes' => 1,
     ],
 

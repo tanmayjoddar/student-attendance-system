@@ -15,7 +15,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'role' => \App\Http\Middleware\RoleMiddleware::class,
-            'attendance' => 'throttle:5,1', // 5 attempts per minute for attendance
+            'attendance' => 'throttle:60,1', // 60 attempts per minute for attendance
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
